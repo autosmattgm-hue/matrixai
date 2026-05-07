@@ -1,6 +1,6 @@
 window.MATRIX_RUNTIME = {
   apiEndpoint: "/api/matrix/respond",
-  healthEndpoint: "/health",
+  healthEndpoint: "/api/health",
   provider: "nvidia",
   executionMode: "browser-shell",
   wakeWords: ["Hey Matrix", "Matrix", "Omega", "Matrix Ultra"],
