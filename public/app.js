@@ -439,6 +439,7 @@
       this.dataArray = null;
       this.stream = null;
       this.fallbackMode = false;
+      this.passiveWakeFallbackEnabled = false;
       this.fallbackCaptureMode = "command";
       this.fallbackRecording = false;
       this.fallbackRecordingStopTimer = null;
@@ -547,8 +548,12 @@
         return "tap";
       }
 
+      if (isMobilePlatform()) {
+        return "fallback";
+      }
+
       const Recognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-      return Recognition ? "live" : "tap";
+      return Recognition ? "live" : "fallback";
     }
 
     async resumeAudioContext() {
@@ -580,6 +585,7 @@
 
         const preferredMode = this.preferredInputMode();
         const Recognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+        this.passiveWakeFallbackEnabled = preferredMode === "fallback";
 
         if (preferredMode === "live" && Recognition) {
           this.setupRecognition(Recognition);
@@ -588,7 +594,14 @@
           return true;
         }
 
-        if (typeof MediaRecorder !== "undefined") {
+        if (preferredMode === "tap" && this.audioContext && this.sourceNode) {
+          this.fallbackMode = true;
+          this.passiveWakeFallbackEnabled = false;
+          this.isReady = true;
+          return true;
+        }
+
+        if (this.audioContext && this.sourceNode) {
           this.fallbackMode = true;
           this.isReady = true;
           return true;
@@ -717,7 +730,9 @@
       if (this.fallbackMode) {
         this.mode = "standby";
         this.shouldRestart = true;
-        this.startFallbackWakeLoop();
+        if (this.passiveWakeFallbackEnabled) {
+          this.startFallbackWakeLoop();
+        }
         return;
       }
 
@@ -2031,16 +2046,21 @@
 
     async returnToIdle(shouldStartPassiveListening = true) {
       const tapMode = this.voice.usesTapMode();
-      const subtitle = tapMode ? "tap the avatar to speak" : "passive listening active";
-      const subheadline = tapMode
+      const passiveWakeLoop = tapMode && this.voice.passiveWakeFallbackEnabled;
+      const subtitle = passiveWakeLoop || !tapMode ? "passive listening active" : "tap the avatar to speak";
+      const subheadline = passiveWakeLoop
+        ? "Passive listening active. Say Hey Matrix, Matrix, or Omega to begin."
+        : tapMode
         ? "Tap the avatar once, speak your command, and Matrix will process it."
         : "Passive listening active. Say Hey Matrix, Matrix, or Omega to begin.";
 
       this.setState(AppState.IDLE, subtitle, "Standby", "Matrix Omega Ultra", subheadline);
-      this.ui.updateTranscript(tapMode ? "Tap the avatar to begin." : "Wake phrase detection standing by.");
+      this.ui.updateTranscript(
+        passiveWakeLoop || !tapMode ? "Wake phrase detection standing by." : "Tap the avatar to begin."
+      );
       this.ui.updateLatency("Standby");
 
-      if (shouldStartPassiveListening && !tapMode) {
+      if (shouldStartPassiveListening && (!tapMode || passiveWakeLoop)) {
         this.voice.startPassiveListening();
       }
     }
