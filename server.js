@@ -10,7 +10,7 @@ import { fileURLToPath } from "node:url";
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const publicDir = path.join(__dirname, "public");
-const avatarPath = path.join(__dirname, "AI-head.png");
+const avatarPath = path.join(publicDir, "AI-head.png");
 
 const PORT = Number(process.env.PORT || 3000);
 const MODEL =

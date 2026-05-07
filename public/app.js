@@ -424,6 +424,8 @@
       this.analyser = null;
       this.dataArray = null;
       this.stream = null;
+      this.isInitializing = false;
+      this.isReady = false;
       this.mode = "standby";
       this.isRecognizing = false;
       this.shouldRestart = false;
@@ -436,6 +438,7 @@
       this.voiceFrames = [];
       this.setupSpeechSynthesis();
       this.installKeyboardFallback();
+      this.installRecoveryHooks();
     }
 
     setupSpeechSynthesis() {
@@ -486,16 +489,49 @@
         if (event.code === "Escape" && "speechSynthesis" in window) {
           window.speechSynthesis.cancel();
         }
-      });
-    }
-
-    async initialize() {
-      const Recognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-
-      if (!Recognition) {
-        this.onError("Speech recognition is not supported in this browser.");
-        return false;
+        });
       }
+
+      installRecoveryHooks() {
+        const resume = () => {
+          this.resumeAudioContext();
+        };
+
+        window.addEventListener("pointerdown", resume);
+        window.addEventListener("visibilitychange", () => {
+          if (document.visibilityState === "visible") {
+            resume();
+          }
+        });
+      }
+
+      async resumeAudioContext() {
+        if (this.audioContext?.state === "suspended") {
+          try {
+            await this.audioContext.resume();
+          } catch (_error) {
+            return;
+          }
+        }
+      }
+
+      async initialize() {
+        if (this.isInitializing) {
+          return false;
+        }
+
+        if (this.isReady && this.recognition) {
+          return true;
+        }
+
+        this.isInitializing = true;
+        const Recognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+
+        if (!Recognition) {
+          this.isInitializing = false;
+          this.onError("Speech recognition is not supported in this browser.");
+          return false;
+        }
 
       try {
         this.stream = await navigator.mediaDevices.getUserMedia({
@@ -503,16 +539,18 @@
             echoCancellation: true,
             noiseSuppression: true,
             autoGainControl: true
-          }
-        });
-      } catch (_error) {
-        this.onError("Microphone permission was denied.");
-        return false;
-      }
+            }
+          });
+        } catch (_error) {
+          this.isInitializing = false;
+          this.onError("Microphone permission was denied.");
+          return false;
+        }
 
-      this.audioContext = new (window.AudioContext || window.webkitAudioContext)();
-      const source = this.audioContext.createMediaStreamSource(this.stream);
-      this.analyser = this.audioContext.createAnalyser();
+        this.audioContext = new (window.AudioContext || window.webkitAudioContext)();
+        await this.resumeAudioContext();
+        const source = this.audioContext.createMediaStreamSource(this.stream);
+        this.analyser = this.audioContext.createAnalyser();
       this.analyser.fftSize = 128;
       this.dataArray = new Uint8Array(this.analyser.frequencyBinCount);
       source.connect(this.analyser);
@@ -527,35 +565,50 @@
         this.isRecognizing = true;
       };
 
-      this.recognition.onend = () => {
-        this.isRecognizing = false;
-        if (this.shouldRestart && this.mode !== "processing" && this.mode !== "speaking") {
-          window.setTimeout(() => this.startPassiveListening(), 180);
-        }
-      };
+        this.recognition.onend = () => {
+          this.isRecognizing = false;
+          if (this.shouldRestart && this.mode !== "processing" && this.mode !== "speaking") {
+            window.setTimeout(() => this.startPassiveListening(), 180);
+          }
+        };
 
-      this.recognition.onerror = (event) => {
-        if (event.error === "not-allowed") {
-          this.onError("Microphone access is blocked.");
-          return;
-        }
+        this.recognition.onerror = (event) => {
+          if (event.error === "not-allowed" || event.error === "service-not-allowed") {
+            this.isReady = false;
+            this.onError("Microphone access is blocked. Tap the avatar once and allow microphone access.");
+            return;
+          }
 
-        if (event.error === "aborted") {
-          return;
-        }
+          if (event.error === "audio-capture") {
+            this.onError("No microphone input was detected. Check the selected microphone and browser permissions.");
+            return;
+          }
 
-        this.onError(`Voice runtime issue: ${event.error}.`);
-      };
+          if (event.error === "aborted") {
+            return;
+          }
 
-      this.recognition.onresult = (event) => this.handleResults(event);
+          if (event.error === "no-speech" || event.error === "network") {
+            if (this.shouldRestart && this.mode !== "processing" && this.mode !== "speaking") {
+              window.setTimeout(() => this.startPassiveListening(), 500);
+            }
+            return;
+          }
 
-      return true;
-    }
+          this.onError(`Voice runtime issue: ${event.error}.`);
+        };
 
-    startPassiveListening() {
-      if (!this.recognition || this.isRecognizing) {
-        return;
+        this.recognition.onresult = (event) => this.handleResults(event);
+
+        this.isInitializing = false;
+        this.isReady = true;
+        return true;
       }
+
+      startPassiveListening() {
+        if (!this.recognition || this.isRecognizing || !this.isReady) {
+          return;
+        }
 
       this.mode = "standby";
       this.shouldRestart = true;
@@ -1023,7 +1076,9 @@
       this.currentState = AppState.BOOTING;
       this.pendingAuthorization = null;
       this.secretTapTimestamps = [];
+      this.isRecoveringVoice = false;
       this.installSettingsGesture();
+      this.installVoiceRecoveryGesture();
     }
 
     installSettingsGesture() {
@@ -1042,6 +1097,39 @@
           window.location.href = "/settings.html";
         }
       });
+    }
+
+    installVoiceRecoveryGesture() {
+      const gestureTarget = dom.avatarStage || dom.avatar;
+
+      if (!gestureTarget) {
+        return;
+      }
+
+      gestureTarget.addEventListener("click", () => {
+        if (this.currentState === AppState.ALERT || !this.voice.isReady) {
+          this.recoverVoiceRuntime();
+        }
+      });
+    }
+
+    async recoverVoiceRuntime() {
+      if (this.isRecoveringVoice) {
+        return;
+      }
+
+      this.isRecoveringVoice = true;
+      this.ui.updateResponse("Reinitializing voice runtime.");
+
+      try {
+        const ready = await this.voice.initialize();
+        if (ready) {
+          this.ui.showPermissionBanner(false);
+          await this.returnToIdle();
+        }
+      } finally {
+        this.isRecoveringVoice = false;
+      }
     }
 
     async init() {
@@ -1072,7 +1160,7 @@
           "microphone access required",
           "Microphone Required",
           "Voice Runtime Blocked",
-          "Grant microphone access to enable passive wake word detection and live response."
+          "Grant microphone access to enable passive wake word detection and live response. Tap the avatar once to retry."
         );
         return;
       }
@@ -1336,7 +1424,7 @@
     }
 
     handleAlert(message) {
-      this.ui.showPermissionBanner(/microphone/i.test(message));
+      this.ui.showPermissionBanner(/microphone|speech recognition|input/i.test(message));
       this.ui.updateResponse(message);
       this.setState(
         AppState.ALERT,
