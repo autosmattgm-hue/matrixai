@@ -1,0 +1,16 @@
+{
+  "name": "Matrix",
+  "short_name": "Matrix",
+  "description": "A voice-first autonomous AI operating interface.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#02060d",
+  "theme_color": "#06111f",
+  "icons": [
+    {
+      "src": "/AI-head.png",
+      "sizes": "300x168",
+      "type": "image/png"
+    }
+  ]
+}

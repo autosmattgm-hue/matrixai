@@ -1,0 +1,24 @@
+{
+  "name": "matrix-voice-os",
+  "version": "1.0.0",
+  "description": "Matrix, a cinematic voice-first AI operating shell powered by AI-head.png.",
+  "type": "module",
+  "scripts": {
+    "dev": "node --watch server.js",
+    "start": "node server.js",
+    "check": "node --check server.js && node --check public/app.js",
+    "vercel:dev": "vercel dev",
+    "vercel:deploy": "vercel",
+    "vercel:prod": "vercel --prod"
+  },
+  "dependencies": {
+    "compression": "^1.8.1",
+    "dotenv": "^16.6.1",
+    "express": "^5.1.0",
+    "express-rate-limit": "^8.1.0",
+    "helmet": "^8.1.0"
+  },
+  "devDependencies": {
+    "vercel": "^48.4.1"
+  }
+}

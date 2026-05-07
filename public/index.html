@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Matrix Omega Ultra | Autonomous Voice Core</title>
+    <meta
+      name="description"
+      content="Matrix Omega Ultra is a cinematic voice-first AI operating core with real-time speech, neural visuals, and secure NVIDIA-backed intelligence."
+    />
+    <meta name="theme-color" content="#06111f" />
+    <meta property="og:title" content="Matrix Omega Ultra | Autonomous Voice Core" />
+    <meta
+      property="og:description"
+      content="A premium voice-driven AI operating core built around AI-head.png with immersive neural states, secure authorization, and real-time speech."
+    />
+    <meta property="og:type" content="website" />
+    <meta property="og:image" content="/AI-head.png" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Orbitron:wght@500;700&family=Space+Grotesk:wght@400;500;700&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <link rel="stylesheet" href="/styles.css" />
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r134/three.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/gsap.min.js"></script>
+    <script src="/runtime-config.js"></script>
+    <script src="/matrix-settings.js"></script>
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@type": "SoftwareApplication",
+        "name": "Matrix Omega Ultra",
+        "applicationCategory": "BusinessApplication",
+        "operatingSystem": "Web",
+        "description": "A cinematic voice-first AI operating core interface with secure NVIDIA-backed intelligence."
+      }
+    </script>
+  </head>
+  <body
+    class="min-h-screen overflow-hidden bg-slate-950 text-slate-100 selection:bg-cyan-300/20"
+    data-state="booting"
+  >
+    <div class="absolute inset-0 bg-[radial-gradient(circle_at_top,_rgba(55,180,255,0.18),_transparent_38%),linear-gradient(180deg,_#06111f_0%,_#02060d_56%,_#000000_100%)]"></div>
+    <canvas id="matrix-webgl" class="absolute inset-0 h-full w-full"></canvas>
+    <div class="ambient-grid absolute inset-0"></div>
+    <div class="noise-overlay absolute inset-0"></div>
+
+    <div id="boot-veil" class="boot-veil"></div>
+
+    <div class="matrix-shell relative z-10 flex min-h-screen items-center justify-center">
+      <main class="matrix-stage-full relative flex h-screen w-screen items-center justify-center overflow-hidden">
+        <div class="stage-vignette absolute inset-0"></div>
+        <div class="orbital-ring orbital-ring-a"></div>
+        <div class="orbital-ring orbital-ring-b"></div>
+        <div class="orbital-ring orbital-ring-c"></div>
+        <div class="neural-lattice neural-lattice-a"></div>
+        <div class="neural-lattice neural-lattice-b"></div>
+        <div class="execution-pulse"></div>
+
+        <div class="avatar-stage relative flex w-full max-w-4xl items-center justify-center px-6 py-8">
+          <div class="avatar-float relative">
+            <div class="avatar-halo"></div>
+            <div class="avatar-aura"></div>
+            <div class="command-orbit command-orbit-a">
+              <span class="command-node"></span>
+              <span class="command-node"></span>
+              <span class="command-node"></span>
+              <span class="command-node"></span>
+            </div>
+            <div class="command-orbit command-orbit-b">
+              <span class="command-node"></span>
+              <span class="command-node"></span>
+              <span class="command-node"></span>
+              <span class="command-node"></span>
+            </div>
+            <div class="avatar-core">
+              <img
+                id="matrix-avatar"
+                src="/AI-head.png"
+                alt="Matrix AI avatar"
+                class="relative z-20 mx-auto w-[min(84vw,38rem)] drop-shadow-[0_0_60px_rgba(103,232,249,0.3)]"
+              />
+              <span class="eye eye-left"></span>
+              <span class="eye eye-right"></span>
+              <span class="mouth-glow"></span>
+            </div>
+            <div class="wave-shell wave-shell-a"></div>
+            <div class="wave-shell wave-shell-b"></div>
+            <div class="data-stream data-stream-a"></div>
+            <div class="data-stream data-stream-b"></div>
+          </div>
+        </div>
+      </main>
+    </div>
+
+    <div class="telemetry-hidden" aria-hidden="true">
+      <span class="status-dot"></span>
+      <p id="status-label">Initializing</p>
+      <p id="state-label">Boot sequence</p>
+      <h1 id="headline">Matrix Omega Ultra</h1>
+      <p id="subheadline">Passive listening is arming.</p>
+      <p id="latency-label">Standby</p>
+      <p id="transcript-panel">Wake phrase detection standing by.</p>
+      <p id="response-panel">Startup channel preparing.</p>
+      <div id="sources-panel"></div>
+      <div id="memory-panel"></div>
+      <div id="audio-visualizer"></div>
+      <div id="permission-banner" class="permission-banner hidden" role="status" aria-live="polite">
+        Microphone access is required for live voice activation.
+      </div>
+    </div>
+    <div id="sr-status" class="sr-only" aria-live="polite"></div>
+
+    <script src="/app.js"></script>
+  </body>
+</html>
