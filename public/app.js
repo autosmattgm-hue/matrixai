@@ -442,6 +442,9 @@
       this.fallbackCaptureMode = "command";
       this.fallbackRecording = false;
       this.fallbackRecordingStopTimer = null;
+      this.fallbackPassiveLoopTimer = null;
+      this.fallbackResultHandler = null;
+      this.fallbackTranscribing = false;
       this.fallbackProcessorNode = null;
       this.fallbackSilenceNode = null;
       this.fallbackAudioChunks = [];
@@ -711,7 +714,14 @@
     }
 
     startPassiveListening() {
-      if (this.fallbackMode || !this.recognition || this.isRecognizing || !this.isReady) {
+      if (this.fallbackMode) {
+        this.mode = "standby";
+        this.shouldRestart = true;
+        this.startFallbackWakeLoop();
+        return;
+      }
+
+      if (!this.recognition || this.isRecognizing || !this.isReady) {
         return;
       }
 
@@ -733,6 +743,7 @@
     stopListening() {
       this.shouldRestart = false;
       window.clearTimeout(this.silenceTimer);
+      window.clearTimeout(this.fallbackPassiveLoopTimer);
 
       if (this.recognition && this.isRecognizing) {
         try {
@@ -758,7 +769,7 @@
     captureFollowUp(mode) {
       this.shouldRestart = false;
       if (this.fallbackMode) {
-        this.toggleFallbackRecording(mode);
+        this.startFallbackCommandCapture(mode);
         return;
       }
 
@@ -777,7 +788,7 @@
 
     activateManualListening(mode = "command") {
       if (this.fallbackMode) {
-        this.toggleFallbackRecording(mode);
+        this.startFallbackCommandCapture(mode);
         return;
       }
 
@@ -811,20 +822,93 @@
       window.setTimeout(startDirectRecognition, 120);
     }
 
-    async toggleFallbackRecording(mode = "command") {
+    startFallbackWakeLoop() {
+      if (
+        !this.fallbackMode ||
+        !this.isReady ||
+        !this.shouldRestart ||
+        this.mode !== "standby" ||
+        this.fallbackRecording ||
+        this.fallbackTranscribing
+      ) {
+        return;
+      }
+
+      this.startFallbackCapture({
+        mode: "wake",
+        durationMs: 2200,
+        onComplete: async ({ transcript }) => {
+          if (!this.shouldRestart || this.mode !== "standby") {
+            return;
+          }
+
+          const spoken = (transcript || "").trim();
+          const match = spoken.match(wakeRegex);
+
+          if (match) {
+            const remainder = spoken.slice(match.index + match[0].length).trim();
+            this.onWake(remainder);
+
+            if (remainder) {
+              this.onTranscript(remainder);
+              this.mode = "processing";
+              this.onCommand(remainder, "command", null);
+              return;
+            }
+
+            this.startFallbackCommandCapture("command");
+            return;
+          }
+
+          this.fallbackPassiveLoopTimer = window.setTimeout(() => {
+            this.startFallbackWakeLoop();
+          }, 180);
+        }
+      });
+    }
+
+    startFallbackCommandCapture(mode = "command") {
+      this.startFallbackCapture({
+        mode,
+        durationMs: mode === "authorization" ? 3200 : 5200,
+        onComplete: async ({ transcript, voiceSignature }) => {
+          const spoken = (transcript || "").trim();
+
+          if (spoken) {
+            this.onTranscript(spoken);
+          }
+
+          this.mode = "processing";
+          this.onCommand(
+            spoken || (mode === "command" ? "Status report." : ""),
+            mode,
+            voiceSignature
+          );
+        }
+      });
+    }
+
+    async startFallbackCapture({ mode, durationMs, onComplete }) {
       if (!this.isReady || !this.stream || !this.audioContext || !this.sourceNode) {
         this.onError("Tap-to-talk is unavailable in this browser.");
         return;
       }
 
-      if (this.fallbackRecording) {
-        this.stopFallbackRecording();
+      if (this.fallbackRecording || this.fallbackTranscribing) {
         return;
       }
 
       this.fallbackCaptureMode = mode;
-      this.beginDirectMode(mode, "");
-      window.clearTimeout(this.silenceTimer);
+      this.fallbackResultHandler = onComplete;
+
+      if (mode === "wake") {
+        this.mode = "standby";
+        this.voiceFrames = [];
+      } else {
+        this.beginDirectMode(mode, "");
+        window.clearTimeout(this.silenceTimer);
+      }
+
       this.fallbackAudioChunks = [];
       this.fallbackSampleRate = this.audioContext.sampleRate || 44100;
       await this.resumeAudioContext();
@@ -847,7 +931,7 @@
       this.fallbackRecording = true;
       this.fallbackRecordingStopTimer = window.setTimeout(() => {
         this.stopFallbackRecording();
-      }, 6500);
+      }, durationMs);
     }
 
     async stopFallbackRecording() {
@@ -872,24 +956,26 @@
 
       const audioBlob = encodeWavBlob(this.fallbackAudioChunks, this.fallbackSampleRate);
       this.fallbackAudioChunks = [];
-
-      if (!audioBlob.size) {
-        this.onError("No microphone input was captured. Tap the avatar and try again.");
-        return;
-      }
+      this.fallbackTranscribing = true;
 
       try {
-        const audioDataUrl = await blobToDataUrl(audioBlob);
-        const transcript = await this.transcribeFallbackAudio(audioDataUrl);
-        this.onTranscript(transcript || "Listening for command...");
+        const transcript = audioBlob.size
+          ? await this.transcribeFallbackAudio(await blobToDataUrl(audioBlob))
+          : "";
         const voiceSignature = buildVoiceSignature(this.voiceFrames);
         this.voiceFrames = [];
-        this.mode = "processing";
-        this.onCommand(transcript || "Status report.", this.fallbackCaptureMode, voiceSignature);
+        await this.fallbackResultHandler?.({
+          transcript,
+          voiceSignature,
+          mode: this.fallbackCaptureMode
+        });
       } catch (error) {
         const message =
           error instanceof Error ? error.message : "Audio transcription failed. Tap the avatar and try again.";
         this.onError(message);
+      } finally {
+        this.fallbackResultHandler = null;
+        this.fallbackTranscribing = false;
       }
     }
 
