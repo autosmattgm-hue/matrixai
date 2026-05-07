@@ -12,7 +12,9 @@
     voiceRecognitionEnabled: false,
     restrictSensitiveToOwner: true,
     ownerMatchThreshold: 0.18,
-    ownerVoicePrint: null
+    ownerVoicePrint: null,
+    inputMode: "auto",
+    hapticsEnabled: true
   };
 
   function clamp(value, min, max, fallback) {
@@ -39,8 +41,14 @@
       voiceRecognitionEnabled: settings.voiceRecognitionEnabled === true,
       restrictSensitiveToOwner: settings.restrictSensitiveToOwner !== false,
       ownerMatchThreshold: clamp(settings.ownerMatchThreshold, 0.08, 0.4, DEFAULTS.ownerMatchThreshold),
-      ownerVoicePrint: normalizeVoicePrint(settings.ownerVoicePrint)
+      ownerVoicePrint: normalizeVoicePrint(settings.ownerVoicePrint),
+      inputMode: normalizeInputMode(settings.inputMode),
+      hapticsEnabled: settings.hapticsEnabled !== false
     };
+  }
+
+  function normalizeInputMode(value) {
+    return value === "live" || value === "tap" ? value : DEFAULTS.inputMode;
   }
 
   function normalizeVoicePrint(value) {

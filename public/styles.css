@@ -298,6 +298,13 @@ a {
   transform: translateY(-1px);
 }
 
+.settings-button[disabled],
+.settings-link[aria-disabled="true"] {
+  opacity: 0.55;
+  cursor: not-allowed;
+  transform: none;
+}
+
 .settings-button-primary {
   background: linear-gradient(90deg, rgba(8, 49, 72, 0.95), rgba(9, 91, 128, 0.95));
 }

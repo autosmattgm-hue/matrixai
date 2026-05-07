@@ -15,6 +15,8 @@ const avatarPath = path.join(publicDir, "AI-head.png");
 const PORT = Number(process.env.PORT || 3000);
 const MODEL =
   process.env.NVIDIA_MODEL || "meta/llama-4-maverick-17b-128e-instruct";
+const ASR_MODEL =
+  process.env.NVIDIA_ASR_MODEL || "nvidia/nemotron-3-nano-30b-vlm";
 const NVIDIA_API_KEY = process.env.NVIDIA_API_KEY || "";
 const NVIDIA_INVOKE_URL =
   process.env.NVIDIA_INVOKE_URL ||
@@ -87,6 +89,7 @@ app.get("/health", (_req, res) => {
     ok: true,
     provider: "nvidia",
     model: MODEL,
+    asrModel: ASR_MODEL,
     executionMode: "browser-shell",
     providerConfigured: Boolean(NVIDIA_API_KEY),
     timestamp: new Date().toISOString()
@@ -102,6 +105,8 @@ app.get("/runtime-config.js", (_req, res) => {
       executionMode: "browser-shell",
       wakeWords: ["Hey Matrix", "Matrix", "Omega", "Matrix Ultra"],
       model: MODEL,
+      asrEndpoint: "/api/matrix/transcribe",
+      asrModel: ASR_MODEL,
       providerConfigured: Boolean(NVIDIA_API_KEY)
     })};`
   );
@@ -182,6 +187,68 @@ app.post("/api/matrix/respond", async (req, res) => {
       text: buildFailureReply(message),
       mode: "degraded",
       sources: []
+    });
+  }
+});
+
+app.post("/api/matrix/transcribe", async (req, res) => {
+  const audioDataUrl =
+    typeof req.body?.audioDataUrl === "string" ? req.body.audioDataUrl.trim() : "";
+
+  if (!audioDataUrl) {
+    res.status(400).json({ error: "An audio payload is required." });
+    return;
+  }
+
+  if (!NVIDIA_API_KEY) {
+    res.status(503).json({ error: "NVIDIA API key is not configured." });
+    return;
+  }
+
+  try {
+    const response = await fetch(NVIDIA_INVOKE_URL, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${NVIDIA_API_KEY}`,
+        Accept: "application/json",
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        model: ASR_MODEL,
+        messages: [
+          {
+            role: "user",
+            content: [
+              "Transcribe the spoken audio exactly.",
+              "Return only the transcription text with no commentary.",
+              `<audio src="${audioDataUrl}" />`
+            ].join("\n")
+          }
+        ],
+        max_tokens: 300,
+        temperature: 0,
+        top_p: 0.1,
+        stream: false
+      })
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`NVIDIA transcription API ${response.status}: ${errorText}`);
+    }
+
+    const payload = await response.json();
+    const text = extractAssistantText(payload).trim();
+
+    res.json({
+      text,
+      model: ASR_MODEL,
+      timestamp: new Date().toISOString()
+    });
+  } catch (error) {
+    console.error("Matrix transcription error", error);
+    res.status(500).json({
+      error: "Matrix could not transcribe the audio."
     });
   }
 });

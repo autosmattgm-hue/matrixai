@@ -1,0 +1,56 @@
+<?xml version="1.0" encoding="utf-8"?>
+<shortcuts xmlns:android="http://schemas.android.com/apk/res/android">
+  <shortcut
+    android:shortcutId="open_matrix"
+    android:enabled="true"
+    android:icon="@mipmap/ic_launcher"
+    android:shortcutShortLabel="Open Matrix"
+    android:shortcutLongLabel="Open Matrix Omega Ultra">
+    <intent
+      android:action="android.intent.action.VIEW"
+      android:targetPackage="com.matrixomega.ultra"
+      android:targetClass="com.matrixomega.ultra.MainActivity"
+      android:data="https://your-domain.vercel.app/?matrix_source=native" />
+    <capability-binding android:key="actions.intent.OPEN_APP_FEATURE">
+      <parameter-binding
+        android:key="feature"
+        android:value="matrix" />
+    </capability-binding>
+  </shortcut>
+
+  <shortcut
+    android:shortcutId="matrix_listen"
+    android:enabled="true"
+    android:icon="@mipmap/ic_launcher"
+    android:shortcutShortLabel="Ask Matrix"
+    android:shortcutLongLabel="Open Matrix and start listening">
+    <intent
+      android:action="android.intent.action.VIEW"
+      android:targetPackage="com.matrixomega.ultra"
+      android:targetClass="com.matrixomega.ultra.MainActivity"
+      android:data="https://your-domain.vercel.app/?matrix_source=native&amp;matrix_intent=listen&amp;matrix_listen=1" />
+    <capability-binding android:key="actions.intent.OPEN_APP_FEATURE">
+      <parameter-binding
+        android:key="feature"
+        android:value="listening" />
+    </capability-binding>
+  </shortcut>
+
+  <shortcut
+    android:shortcutId="matrix_settings"
+    android:enabled="true"
+    android:icon="@mipmap/ic_launcher"
+    android:shortcutShortLabel="Matrix Settings"
+    android:shortcutLongLabel="Open Matrix settings">
+    <intent
+      android:action="android.intent.action.VIEW"
+      android:targetPackage="com.matrixomega.ultra"
+      android:targetClass="com.matrixomega.ultra.MainActivity"
+      android:data="https://your-domain.vercel.app/?matrix_source=native&amp;matrix_route=settings" />
+    <capability-binding android:key="actions.intent.OPEN_APP_FEATURE">
+      <parameter-binding
+        android:key="feature"
+        android:value="settings" />
+    </capability-binding>
+  </shortcut>
+</shortcuts>

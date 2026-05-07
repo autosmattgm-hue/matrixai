@@ -25,7 +25,8 @@
     permissionBanner: document.getElementById("permission-banner"),
     latencyLabel: document.getElementById("latency-label"),
     avatar: document.getElementById("matrix-avatar"),
-    avatarStage: document.querySelector(".avatar-stage")
+    avatarStage: document.querySelector(".avatar-stage"),
+    cameraCapture: document.getElementById("camera-capture")
   };
 
   const runtime = window.MATRIX_RUNTIME || {
@@ -35,8 +36,11 @@
     executionMode: "browser-shell",
     wakeWords: ["Hey Matrix", "Matrix", "Omega", "Matrix Ultra"],
     model: "meta/llama-4-maverick-17b-128e-instruct",
+    asrEndpoint: "/api/matrix/transcribe",
+    asrModel: "nvidia/nemotron-3-nano-30b-vlm",
     providerConfigured: false
   };
+
   const settingsApi = window.MatrixSettings;
   const matrixSettings = settingsApi
     ? settingsApi.load()
@@ -47,8 +51,15 @@
         speechVolume: 1,
         startupGreeting: true,
         visualIntensity: 1,
-        rememberContext: true
+        rememberContext: true,
+        voiceRecognitionEnabled: false,
+        restrictSensitiveToOwner: true,
+        ownerMatchThreshold: 0.18,
+        ownerVoicePrint: null,
+        inputMode: "auto",
+        hapticsEnabled: true
       };
+
   const wakeRegex = /\b(?:hey\s+matrix|matrix\s+ultra|matrix|omega)\b/i;
   const AUTH_CONFIRM_REGEX = /\b(?:authorize|authorise|confirmed|confirm|proceed|approved|grant access|yes)\b/i;
   const AUTH_CANCEL_REGEX = /\b(?:cancel|deny|abort|stop|negative|no)\b/i;
@@ -81,10 +92,7 @@
         autoAlpha: 0,
         y: 18
       });
-
-      gsap.set("#boot-veil", {
-        autoAlpha: 1
-      });
+      gsap.set("#boot-veil", { autoAlpha: 1 });
 
       gsap.fromTo(
         dom.avatar,
@@ -186,13 +194,20 @@
       }
     }
 
-    showPermissionBanner(visible) {
+    showPermissionBanner(visible, message) {
+      if (message) {
+        dom.permissionBanner.textContent = message;
+      }
       dom.permissionBanner.classList.toggle("hidden", !visible);
     }
 
     animateVisualizer(levels, state) {
       const activeBoost =
-        state === AppState.LISTENING || state === AppState.SPEAKING ? 1 : state === AppState.THINKING ? 0.55 : 0.22;
+        state === AppState.LISTENING || state === AppState.SPEAKING
+          ? 1
+          : state === AppState.THINKING
+            ? 0.55
+            : 0.22;
 
       this.barElements.forEach((bar, index) => {
         const level = levels[index % levels.length] || 0;
@@ -280,31 +295,23 @@
       this.renderer.setSize(window.innerWidth, window.innerHeight);
 
       this.scene = new THREE.Scene();
-      this.camera = new THREE.PerspectiveCamera(
-        42,
-        window.innerWidth / window.innerHeight,
-        0.1,
-        100
-      );
+      this.camera = new THREE.PerspectiveCamera(42, window.innerWidth / window.innerHeight, 0.1, 100);
       this.camera.position.z = 12;
 
       const particleGeometry = new THREE.BufferGeometry();
       const particleCount = 900;
       const positions = new Float32Array(particleCount * 3);
 
-      for (let i = 0; i < particleCount; i += 1) {
+      for (let index = 0; index < particleCount; index += 1) {
         const radius = 4 + Math.random() * 4;
         const theta = Math.random() * Math.PI * 2;
         const phi = Math.acos(2 * Math.random() - 1);
-        positions[i * 3] = radius * Math.sin(phi) * Math.cos(theta);
-        positions[i * 3 + 1] = radius * Math.sin(phi) * Math.sin(theta);
-        positions[i * 3 + 2] = radius * Math.cos(phi);
+        positions[index * 3] = radius * Math.sin(phi) * Math.cos(theta);
+        positions[index * 3 + 1] = radius * Math.sin(phi) * Math.sin(theta);
+        positions[index * 3 + 2] = radius * Math.cos(phi);
       }
 
-      particleGeometry.setAttribute(
-        "position",
-        new THREE.BufferAttribute(positions, 3)
-      );
+      particleGeometry.setAttribute("position", new THREE.BufferAttribute(positions, 3));
 
       const particleMaterial = new THREE.PointsMaterial({
         color: 0x7dd3fc,
@@ -316,26 +323,23 @@
       this.particles = new THREE.Points(particleGeometry, particleMaterial);
       this.scene.add(this.particles);
 
-      const ringMaterialA = new THREE.MeshBasicMaterial({
-        color: 0x38bdf8,
-        transparent: true,
-        opacity: 0.13,
-        wireframe: true
-      });
-      const ringMaterialB = new THREE.MeshBasicMaterial({
-        color: 0x67e8f9,
-        transparent: true,
-        opacity: 0.09,
-        wireframe: true
-      });
-
       this.ringA = new THREE.Mesh(
         new THREE.TorusGeometry(5.3, 0.03, 16, 160),
-        ringMaterialA
+        new THREE.MeshBasicMaterial({
+          color: 0x38bdf8,
+          transparent: true,
+          opacity: 0.13,
+          wireframe: true
+        })
       );
       this.ringB = new THREE.Mesh(
         new THREE.TorusGeometry(3.9, 0.02, 16, 140),
-        ringMaterialB
+        new THREE.MeshBasicMaterial({
+          color: 0x67e8f9,
+          transparent: true,
+          opacity: 0.09,
+          wireframe: true
+        })
       );
       this.ringC = new THREE.Mesh(
         new THREE.TorusGeometry(4.7, 0.018, 16, 140),
@@ -346,6 +350,7 @@
           wireframe: true
         })
       );
+
       this.ringA.rotation.x = Math.PI / 2.5;
       this.ringB.rotation.y = Math.PI / 2.8;
       this.ringC.rotation.z = Math.PI / 5;
@@ -432,11 +437,17 @@
       this.analyser = null;
       this.dataArray = null;
       this.stream = null;
+      this.mediaRecorder = null;
+      this.recordedChunks = [];
+      this.fallbackMode = false;
+      this.fallbackCaptureMode = "command";
+      this.fallbackRecording = false;
+      this.fallbackRecordingStopTimer = null;
       this.isInitializing = false;
       this.isReady = false;
-      this.mode = "standby";
       this.isRecognizing = false;
       this.shouldRestart = false;
+      this.mode = "standby";
       this.finalSegments = [];
       this.interimSegment = "";
       this.silenceTimer = null;
@@ -444,6 +455,7 @@
       this.pendingGreeting = null;
       this.voices = [];
       this.voiceFrames = [];
+      this.recognitionRestartFailures = 0;
       this.setupSpeechSynthesis();
       this.installKeyboardFallback();
       this.installRecoveryHooks();
@@ -480,7 +492,7 @@
           event.preventDefault();
           if (this.mode === "standby") {
             this.onWake("");
-            this.beginDirectMode("command", "");
+            this.activateManualListening();
           }
         }
 
@@ -494,75 +506,140 @@
           this.finalizeCommand("cancel");
         }
 
-        if (event.code === "Escape" && "speechSynthesis" in window) {
-          window.speechSynthesis.cancel();
-        }
-        });
-      }
-
-      installRecoveryHooks() {
-        const resume = () => {
-          this.resumeAudioContext();
-        };
-
-        window.addEventListener("pointerdown", resume);
-        window.addEventListener("visibilitychange", () => {
-          if (document.visibilityState === "visible") {
-            resume();
+        if (event.code === "Escape") {
+          if ("speechSynthesis" in window) {
+            window.speechSynthesis.cancel();
           }
-        });
+          this.stopListening();
+        }
+      });
+    }
+
+    installRecoveryHooks() {
+      const resume = () => {
+        this.resumeAudioContext();
+      };
+
+      window.addEventListener("pointerdown", resume);
+      window.addEventListener("visibilitychange", () => {
+        if (document.visibilityState === "visible") {
+          resume();
+        }
+      });
+    }
+
+    usesTapMode() {
+      return this.fallbackMode;
+    }
+
+    preferredInputMode() {
+      if (this.settings.inputMode === "live") {
+        return "live";
       }
 
-      async resumeAudioContext() {
-        if (this.audioContext?.state === "suspended") {
-          try {
-            await this.audioContext.resume();
-          } catch (_error) {
-            return;
-          }
+      if (this.settings.inputMode === "tap") {
+        return "tap";
+      }
+
+      return isMobilePlatform() ? "tap" : "live";
+    }
+
+    async resumeAudioContext() {
+      if (this.audioContext?.state === "suspended") {
+        try {
+          await this.audioContext.resume();
+        } catch (_error) {
+          return;
         }
       }
+    }
 
-      async initialize() {
-        if (this.isInitializing) {
+    async initialize() {
+      if (this.isInitializing) {
+        return false;
+      }
+
+      if (this.isReady) {
+        return true;
+      }
+
+      this.isInitializing = true;
+
+      try {
+        const audioReady = await this.initializeAudioMonitoring();
+        if (!audioReady) {
           return false;
         }
 
-        if (this.isReady && this.recognition) {
+        const preferredMode = this.preferredInputMode();
+        const Recognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+
+        if (preferredMode === "live" && Recognition) {
+          this.setupRecognition(Recognition);
+          this.isReady = true;
+          this.fallbackMode = false;
           return true;
         }
 
-        this.isInitializing = true;
-        const Recognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-
-        if (!Recognition) {
-          this.isInitializing = false;
-          this.onError("Speech recognition is not supported in this browser.");
-          return false;
+        if (typeof MediaRecorder !== "undefined") {
+          this.fallbackMode = true;
+          this.isReady = true;
+          return true;
         }
 
-      try {
-        this.stream = await navigator.mediaDevices.getUserMedia({
-          audio: {
-            echoCancellation: true,
-            noiseSuppression: true,
-            autoGainControl: true
+        if (Recognition) {
+          this.setupRecognition(Recognition);
+          this.isReady = true;
+          this.fallbackMode = false;
+          return true;
+        }
+
+        this.onError("This browser does not expose a supported voice capture path.");
+        return false;
+      } finally {
+        this.isInitializing = false;
+      }
+    }
+
+    async initializeAudioMonitoring() {
+      if (!navigator.mediaDevices?.getUserMedia) {
+        this.onError("Microphone capture is not available in this browser.");
+        return false;
+      }
+
+      if (!this.stream) {
+        try {
+          this.stream = await navigator.mediaDevices.getUserMedia({
+            audio: {
+              echoCancellation: true,
+              noiseSuppression: true,
+              autoGainControl: true
             }
           });
         } catch (_error) {
-          this.isInitializing = false;
           this.onError("Microphone permission was denied.");
           return false;
         }
+      }
 
+      if (!this.audioContext) {
         this.audioContext = new (window.AudioContext || window.webkitAudioContext)();
         await this.resumeAudioContext();
         const source = this.audioContext.createMediaStreamSource(this.stream);
         this.analyser = this.audioContext.createAnalyser();
-      this.analyser.fftSize = 128;
-      this.dataArray = new Uint8Array(this.analyser.frequencyBinCount);
-      source.connect(this.analyser);
-      this.monitorAudio();
+        this.analyser.fftSize = 128;
+        this.dataArray = new Uint8Array(this.analyser.frequencyBinCount);
+        source.connect(this.analyser);
+        this.monitorAudio();
+      }
+
+      return true;
+    }
+
+    setupRecognition(Recognition) {
+      if (this.recognition) {
+        return;
+      }
 
       this.recognition = new Recognition();
       this.recognition.continuous = true;
@@ -571,52 +648,68 @@
 
       this.recognition.onstart = () => {
         this.isRecognizing = true;
+        this.recognitionRestartFailures = 0;
       };
 
-        this.recognition.onend = () => {
-          this.isRecognizing = false;
-          if (this.shouldRestart && this.mode !== "processing" && this.mode !== "speaking") {
-            window.setTimeout(() => this.startPassiveListening(), 180);
-          }
-        };
+      this.recognition.onend = () => {
+        this.isRecognizing = false;
+        if (this.shouldRestart && this.mode !== "processing" && this.mode !== "speaking") {
+          window.setTimeout(() => this.startPassiveListening(), 180);
+        }
+      };
 
-        this.recognition.onerror = (event) => {
-          if (event.error === "not-allowed" || event.error === "service-not-allowed") {
-            this.isReady = false;
-            this.onError("Microphone access is blocked. Tap the avatar once and allow microphone access.");
-            return;
-          }
+      this.recognition.onerror = (event) => {
+        const { error } = event;
 
-          if (event.error === "audio-capture") {
-            this.onError("No microphone input was detected. Check the selected microphone and browser permissions.");
-            return;
-          }
-
-          if (event.error === "aborted") {
-            return;
-          }
-
-          if (event.error === "no-speech" || event.error === "network") {
-            if (this.shouldRestart && this.mode !== "processing" && this.mode !== "speaking") {
-              window.setTimeout(() => this.startPassiveListening(), 500);
-            }
-            return;
-          }
-
-          this.onError(`Voice runtime issue: ${event.error}.`);
-        };
-
-        this.recognition.onresult = (event) => this.handleResults(event);
-
-        this.isInitializing = false;
-        this.isReady = true;
-        return true;
-      }
-
-      startPassiveListening() {
-        if (!this.recognition || this.isRecognizing || !this.isReady) {
+        if (error === "not-allowed" || error === "service-not-allowed") {
+          this.isReady = false;
+          this.onError("Microphone access is blocked. Tap the avatar once and allow microphone access.");
           return;
         }
+
+        if (error === "audio-capture") {
+          this.onError("No microphone input was detected. Check browser permission and the active microphone.");
+          return;
+        }
+
+        if (error === "aborted") {
+          return;
+        }
+
+        if (error === "network" || error === "service-not-available") {
+          this.promoteToFallbackMode("Live speech recognition is unstable. Tap the avatar and speak.");
+          return;
+        }
+
+        if (error === "no-speech") {
+          if (this.shouldRestart && this.mode === "standby") {
+            window.setTimeout(() => this.startPassiveListening(), 400);
+          }
+          return;
+        }
+
+        this.onError(`Voice runtime issue: ${error}.`);
+      };
+
+      this.recognition.onresult = (event) => this.handleResults(event);
+    }
+
+    promoteToFallbackMode(message) {
+      if (typeof MediaRecorder === "undefined") {
+        this.onError(message);
+        return;
+      }
+
+      this.fallbackMode = true;
+      this.shouldRestart = false;
+      this.stopListening();
+      this.onError(message);
+    }
+
+    startPassiveListening() {
+      if (this.fallbackMode || !this.recognition || this.isRecognizing || !this.isReady) {
+        return;
+      }
 
       this.mode = "standby";
       this.shouldRestart = true;
@@ -624,14 +717,29 @@
       try {
         this.recognition.start();
       } catch (_error) {
-        window.setTimeout(() => this.startPassiveListening(), 220);
+        this.recognitionRestartFailures += 1;
+        if (this.recognitionRestartFailures >= 4) {
+          this.promoteToFallbackMode("Passive listening was unreliable. Matrix switched to tap-to-talk mode.");
+          return;
+        }
+        window.setTimeout(() => this.startPassiveListening(), 250);
       }
     }
 
     stopListening() {
       this.shouldRestart = false;
+      window.clearTimeout(this.silenceTimer);
+
       if (this.recognition && this.isRecognizing) {
-        this.recognition.stop();
+        try {
+          this.recognition.stop();
+        } catch (_error) {
+          // Best-effort shutdown.
+        }
+      }
+
+      if (this.fallbackRecording) {
+        this.stopFallbackRecording();
       }
     }
 
@@ -645,6 +753,11 @@
 
     captureFollowUp(mode) {
       this.shouldRestart = false;
+      if (this.fallbackMode) {
+        this.toggleFallbackRecording(mode);
+        return;
+      }
+
       this.beginDirectMode(mode, "");
 
       if (!this.recognition || this.isRecognizing) {
@@ -658,6 +771,129 @@
       }
     }
 
+    activateManualListening(mode = "command") {
+      if (this.fallbackMode) {
+        this.toggleFallbackRecording(mode);
+        return;
+      }
+
+      if (!this.isReady || !this.recognition) {
+        return;
+      }
+
+      this.shouldRestart = false;
+      this.beginDirectMode(mode, "");
+
+      if (this.isRecognizing) {
+        try {
+          this.recognition.stop();
+        } catch (_error) {
+          // Allow the delayed restart below to recover.
+        }
+      }
+
+      const startDirectRecognition = () => {
+        if (!this.recognition || this.isRecognizing || !this.isReady) {
+          return;
+        }
+
+        try {
+          this.recognition.start();
+        } catch (_error) {
+          window.setTimeout(startDirectRecognition, 220);
+        }
+      };
+
+      window.setTimeout(startDirectRecognition, 120);
+    }
+
+    async toggleFallbackRecording(mode = "command") {
+      if (!this.isReady || !this.stream || typeof MediaRecorder === "undefined") {
+        this.onError("Tap-to-talk is unavailable in this browser.");
+        return;
+      }
+
+      if (this.fallbackRecording) {
+        this.stopFallbackRecording();
+        return;
+      }
+
+      this.fallbackCaptureMode = mode;
+      this.beginDirectMode(mode, "");
+      this.recordedChunks = [];
+      const recorderOptions = MediaRecorder.isTypeSupported("audio/webm;codecs=opus")
+        ? { mimeType: "audio/webm;codecs=opus" }
+        : MediaRecorder.isTypeSupported("audio/webm")
+          ? { mimeType: "audio/webm" }
+          : null;
+      this.mediaRecorder = recorderOptions
+        ? new MediaRecorder(this.stream, recorderOptions)
+        : new MediaRecorder(this.stream);
+
+      this.mediaRecorder.ondataavailable = (event) => {
+        if (event.data && event.data.size > 0) {
+          this.recordedChunks.push(event.data);
+        }
+      };
+
+      this.mediaRecorder.onstop = async () => {
+        this.fallbackRecording = false;
+        window.clearTimeout(this.fallbackRecordingStopTimer);
+
+        const audioBlob = new Blob(this.recordedChunks, {
+          type: this.mediaRecorder?.mimeType || "audio/webm"
+        });
+        this.recordedChunks = [];
+
+        if (!audioBlob.size) {
+          this.onError("No microphone input was captured. Tap the avatar and try again.");
+          return;
+        }
+
+        try {
+          const audioDataUrl = await blobToDataUrl(audioBlob);
+          const transcript = await this.transcribeFallbackAudio(audioDataUrl);
+          this.onTranscript(transcript || "Listening for command...");
+          const voiceSignature = buildVoiceSignature(this.voiceFrames);
+          this.voiceFrames = [];
+          this.mode = "processing";
+          this.onCommand(transcript || "Status report.", this.fallbackCaptureMode, voiceSignature);
+        } catch (_error) {
+          this.onError("Audio transcription failed. Tap the avatar and try again.");
+        }
+      };
+
+      this.fallbackRecording = true;
+      this.mediaRecorder.start();
+      this.fallbackRecordingStopTimer = window.setTimeout(() => {
+        this.stopFallbackRecording();
+      }, 6500);
+    }
+
+    stopFallbackRecording() {
+      if (this.mediaRecorder && this.fallbackRecording && this.mediaRecorder.state !== "inactive") {
+        this.mediaRecorder.stop();
+      }
+    }
+
+    async transcribeFallbackAudio(audioDataUrl) {
+      const endpoint = runtime.asrEndpoint || "/api/matrix/transcribe";
+      const response = await fetch(endpoint, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({ audioDataUrl })
+      });
+
+      if (!response.ok) {
+        throw new Error(`Matrix transcription backend returned ${response.status}`);
+      }
+
+      const payload = await response.json();
+      return typeof payload.text === "string" ? payload.text.trim() : "";
+    }
+
     handleResults(event) {
       if (this.mode === "processing" || this.mode === "speaking") {
         return;
@@ -665,8 +901,8 @@
 
       let interim = "";
 
-      for (let i = event.resultIndex; i < event.results.length; i += 1) {
-        const result = event.results[i];
+      for (let index = event.resultIndex; index < event.results.length; index += 1) {
+        const result = event.results[index];
         const transcript = result[0].transcript.trim();
 
         if (!transcript) {
@@ -793,6 +1029,7 @@
 
           this.onAudioLevel(average, values);
         }
+
         requestAnimationFrame(tick);
       };
 
@@ -801,8 +1038,9 @@
   }
 
   class MatrixAIService {
-    constructor(memory) {
+    constructor(memory, options) {
       this.memory = memory;
+      this.options = options;
     }
 
     async respond(message) {
@@ -844,107 +1082,186 @@
 
       if (/\bclear memory\b/.test(lower)) {
         this.memory.clear();
-        return {
-          type: "local",
-          id: "clear-memory",
-          text: "Context memory cleared. I am back to a clean state.",
-          sources: []
-        };
+        return this.localResult("clear-memory", "Context memory cleared. I am back to a clean state.");
       }
 
       if (/\b(time|what time)\b/.test(lower)) {
-        return {
-          type: "local",
-          id: "time-check",
-          text: `Local time is ${new Date().toLocaleTimeString([], {
-            hour: "numeric",
-            minute: "2-digit"
-          })}.`,
-          sources: []
-        };
+        return this.localResult(
+          "time-check",
+          `Local time is ${new Date().toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}.`
+        );
       }
 
       if (/\b(date|day|what day)\b/.test(lower)) {
-        return {
-          type: "local",
-          id: "date-check",
-          text: `Today is ${new Date().toLocaleDateString([], {
+        return this.localResult(
+          "date-check",
+          `Today is ${new Date().toLocaleDateString([], {
             weekday: "long",
             year: "numeric",
             month: "long",
             day: "numeric"
-          })}.`,
-          sources: []
-        };
-      }
-
-      if (/\b(open calendar|calendar management)\b/.test(lower)) {
-        return {
-          type: "action",
-          id: "open-calendar",
-          label: "open calendar",
-          execute: async () => this.openUrl("https://calendar.google.com", "Calendar channel active."),
-          sources: []
-        };
-      }
-
-      if (/\b(open github)\b/.test(lower)) {
-        return {
-          type: "action",
-          id: "open-github",
-          label: "open GitHub",
-          execute: async () => this.openUrl("https://github.com", "GitHub channel active."),
-          sources: []
-        };
-      }
-
-      if (/\b(open nvidia)\b/.test(lower)) {
-        return {
-          type: "action",
-          id: "open-nvidia",
-          label: "open NVIDIA platform",
-          execute: async () => this.openUrl("https://build.nvidia.com", "NVIDIA platform active."),
-          sources: []
-        };
-      }
-
-      if (/\b(open gmail|open email)\b/.test(lower)) {
-        return {
-          type: "action",
-          id: "open-gmail",
-          label: "open Gmail",
-          execute: async () => this.openUrl("https://mail.google.com", "Email channel active."),
-          sources: []
-        };
+          })}.`
+        );
       }
 
       if (/\b(system status|system monitoring|monitor system performance|performance status|cpu|ram diagnostics)\b/.test(lower)) {
-        return {
-          type: "local",
-          id: "system-status",
-          text: this.buildSystemStatusReport(),
-          sources: []
-        };
+        return this.localResult("system-status", this.buildSystemStatusReport());
+      }
+
+      if (/\bopen settings\b/.test(lower)) {
+        return this.actionResult("open-settings", "open settings", async () => {
+          window.location.href = "/settings.html";
+          return { text: "Settings channel opening.", sources: [] };
+        });
+      }
+
+      if (/\binstall matrix\b|\binstall app\b|\badd to home screen\b/.test(lower)) {
+        return this.actionResult("install-matrix", "install Matrix", async () => {
+          const didPrompt = await this.options.requestInstall();
+          if (didPrompt) {
+            return { text: "Install prompt opened.", sources: [] };
+          }
+
+          const context = this.options.getRuntimeContext();
+          if (context.platform.isIOS && !context.standalone) {
+            return {
+              text: "Install prompt is not system-driven on iPhone. Open Share, then choose Add to Home Screen.",
+              sources: []
+            };
+          }
+
+          return {
+            text: "Install prompt is not available yet. Open settings for install guidance once the browser allows it.",
+            sources: []
+          };
+        });
+      }
+
+      if (/\b(open calendar|calendar management)\b/.test(lower)) {
+        return this.actionResult(
+          "open-calendar",
+          "open calendar",
+          async () => this.openUrl("https://calendar.google.com", "Calendar channel active.")
+        );
+      }
+
+      if (/\b(open github)\b/.test(lower)) {
+        return this.actionResult(
+          "open-github",
+          "open GitHub",
+          async () => this.openUrl("https://github.com", "GitHub channel active.")
+        );
+      }
+
+      if (/\b(open nvidia)\b/.test(lower)) {
+        return this.actionResult(
+          "open-nvidia",
+          "open NVIDIA platform",
+          async () => this.openUrl("https://build.nvidia.com", "NVIDIA platform active.")
+        );
+      }
+
+      if (/\b(open gmail|open email)\b/.test(lower)) {
+        return this.actionResult(
+          "open-gmail",
+          "open Gmail",
+          async () => this.openUrl("https://mail.google.com", "Email channel active.")
+        );
       }
 
       if (/\bdraft email to\b/.test(lower)) {
-        return {
-          type: "action",
-          id: "draft-email",
-          label: "draft email",
-          execute: async () => {
-            const match = message.match(/draft email to\s+(.+)/i);
-            const target = match?.[1]?.trim() || "team";
-            const subject = encodeURIComponent("Strategic follow-up");
-            const body = encodeURIComponent("Outline the key action items and next steps.");
-            window.open(`mailto:${encodeURIComponent(target)}?subject=${subject}&body=${body}`);
+        return this.actionResult("draft-email", "draft email", async () => {
+          const match = message.match(/draft email to\s+(.+)/i);
+          const target = match?.[1]?.trim() || "team";
+          const subject = encodeURIComponent("Strategic follow-up");
+          const body = encodeURIComponent("Outline the key action items and next steps.");
+          return this.openUrl(
+            `mailto:${encodeURIComponent(target)}?subject=${subject}&body=${body}`,
+            `Email draft initiated for ${target}.`,
+            "_self"
+          );
+        });
+      }
+
+      const callTarget = extractPhoneTarget(message, /\b(?:call|dial)\s+(.+)/i);
+      if (callTarget) {
+        return this.actionResult("call-contact", "place call", async () => {
+          const digits = normalizePhoneDigits(callTarget);
+          if (!digits) {
             return {
-              text: `Email draft initiated for ${target}.`,
+              text: "I can open the phone dialer when you provide a number.",
               sources: []
             };
-          },
-          sources: []
-        };
+          }
+
+          return this.openUrl(`tel:${digits}`, `Dialer ready for ${formatPhoneForSpeech(digits)}.`, "_self");
+        });
+      }
+
+      const smsPayload = extractSmsPayload(message);
+      if (smsPayload) {
+        return this.actionResult("send-text", "send text", async () => {
+          const digits = normalizePhoneDigits(smsPayload.target);
+          if (!digits) {
+            return {
+              text: "I can open messages when you provide a phone number.",
+              sources: []
+            };
+          }
+
+          const body = smsPayload.body ? `?body=${encodeURIComponent(smsPayload.body)}` : "";
+          return this.openUrl(
+            `sms:${digits}${body}`,
+            smsPayload.body
+              ? `Text draft prepared for ${formatPhoneForSpeech(digits)}.`
+              : `Messaging channel opened for ${formatPhoneForSpeech(digits)}.`,
+            "_self"
+          );
+        });
+      }
+
+      const destination = extractDestination(message);
+      if (destination) {
+        return this.actionResult("open-maps", "open maps", async () => {
+          const url = buildMapsUrl(destination);
+          return this.openUrl(url, `Navigation route prepared for ${destination}.`, "_self");
+        });
+      }
+
+      if (/\b(open camera|launch camera|take photo|take picture)\b/.test(lower)) {
+        return this.actionResult("open-camera", "open camera", async () => {
+          const opened = this.options.openCamera();
+          return {
+            text: opened
+              ? "Camera channel opening."
+              : "Camera capture is not available in this browser session.",
+            sources: []
+          };
+        });
+      }
+
+      if (/\bshare (?:this|status|update|brief)\b/.test(lower)) {
+        return this.actionResult("share-brief", "share brief", async () => {
+          const shared = await this.shareLatestBrief();
+          return {
+            text: shared
+              ? "Share sheet opened."
+              : "Sharing is unavailable here. I copied the latest brief to the clipboard instead.",
+            sources: []
+          };
+        });
+      }
+
+      if (/\bcopy (?:response|brief|status)\b/.test(lower)) {
+        return this.actionResult("copy-brief", "copy brief", async () => {
+          const text = this.getLatestAssistantReply();
+          if (!text) {
+            return { text: "There is no recent Matrix brief to copy yet.", sources: [] };
+          }
+
+          await copyText(text);
+          return { text: "Latest Matrix brief copied.", sources: [] };
+        });
       }
 
       if (/\b(open visual studio code|open vs code|launch visual studio code)\b/.test(lower)) {
@@ -1022,8 +1339,32 @@
       };
     }
 
-    openUrl(url, spokenResult) {
-      window.open(url, "_blank", "noopener,noreferrer");
+    localResult(id, text) {
+      return {
+        type: "local",
+        id,
+        text,
+        sources: []
+      };
+    }
+
+    actionResult(id, label, execute) {
+      return {
+        type: "action",
+        id,
+        label,
+        execute,
+        sources: []
+      };
+    }
+
+    openUrl(url, spokenResult, target = "_blank") {
+      if (target === "_self") {
+        window.location.href = url;
+      } else {
+        window.open(url, target, "noopener,noreferrer");
+      }
+
       return {
         text: spokenResult,
         sources: []
@@ -1058,11 +1399,34 @@
       };
     }
 
+    async shareLatestBrief() {
+      const latest = this.getLatestAssistantReply() || "Matrix Omega Ultra is active.";
+
+      if (navigator.share) {
+        await navigator.share({
+          title: "Matrix Omega Ultra",
+          text: latest,
+          url: window.location.href
+        });
+        return true;
+      }
+
+      await copyText(latest);
+      return false;
+    }
+
+    getLatestAssistantReply() {
+      const latest = [...this.memory.list()].reverse().find((entry) => entry.role === "assistant");
+      return latest?.content || "";
+    }
+
     buildSystemStatusReport() {
+      const context = this.options.getRuntimeContext();
       const cores = navigator.hardwareConcurrency || "unknown";
       const memory = navigator.deviceMemory ? `${navigator.deviceMemory} gigabytes` : "unknown";
       const online = navigator.onLine ? "online" : "offline";
-      return `System diagnostics stable. Reported CPU threads: ${cores}. Reported device memory: ${memory}. Network status: ${online}. Execution mode: browser shell.`;
+      const installState = context.standalone ? "installed shell active" : "browser session";
+      return `System diagnostics stable. Reported CPU threads: ${cores}. Reported device memory: ${memory}. Network status: ${online}. Execution mode: browser shell. Input mode: ${context.inputMode}. Session mode: ${installState}.`;
     }
   }
 
@@ -1072,7 +1436,13 @@
       this.settings = matrixSettings;
       this.memory = new MemoryStore(this.settings);
       this.scene = new MatrixScene(this.settings);
-      this.ai = new MatrixAIService(this.memory);
+      this.launchContext = this.parseLaunchContext();
+      this.deferredInstallPrompt = null;
+      this.ai = new MatrixAIService(this.memory, {
+        openCamera: () => this.openCamera(),
+        requestInstall: () => this.requestInstallPrompt(),
+        getRuntimeContext: () => this.getRuntimeContext()
+      });
       this.voice = new MatrixVoiceEngine({
         onWake: (seed) => this.handleWake(seed),
         onTranscript: (text) => this.handleTranscript(text),
@@ -1087,6 +1457,40 @@
       this.isRecoveringVoice = false;
       this.installSettingsGesture();
       this.installVoiceRecoveryGesture();
+      this.installPwaHooks();
+    }
+
+    parseLaunchContext() {
+      const params = new URLSearchParams(window.location.search);
+      return {
+        source: params.get("matrix_source") || "",
+        intent: params.get("matrix_intent") || "",
+        route: params.get("matrix_route") || "",
+        listen: ["1", "true", "yes"].includes((params.get("matrix_listen") || "").toLowerCase())
+      };
+    }
+
+    installPwaHooks() {
+      window.addEventListener("beforeinstallprompt", (event) => {
+        event.preventDefault();
+        this.deferredInstallPrompt = event;
+      });
+
+      window.addEventListener("appinstalled", () => {
+        this.deferredInstallPrompt = null;
+      });
+    }
+
+    async registerServiceWorker() {
+      if (!("serviceWorker" in navigator)) {
+        return;
+      }
+
+      try {
+        await navigator.serviceWorker.register("/sw.js");
+      } catch (_error) {
+        // Offline shell registration is best-effort.
+      }
     }
 
     installSettingsGesture() {
@@ -1116,12 +1520,49 @@
 
       gestureTarget.addEventListener("click", () => {
         if (this.currentState === AppState.ALERT || !this.voice.isReady) {
-          this.recoverVoiceRuntime();
+          this.recoverVoiceRuntime(true);
+          return;
+        }
+
+        if (this.currentState === AppState.IDLE) {
+          this.handleWake("");
+          this.voice.activateManualListening();
         }
       });
     }
 
-    async recoverVoiceRuntime() {
+    getRuntimeContext() {
+      return {
+        standalone: isStandaloneDisplay(),
+        platform: {
+          isMobile: isMobilePlatform(),
+          isIOS: isIOSPlatform()
+        },
+        inputMode: this.voice.usesTapMode() ? "tap-to-talk" : "passive listening"
+      };
+    }
+
+    async requestInstallPrompt() {
+      if (!this.deferredInstallPrompt) {
+        return false;
+      }
+
+      this.deferredInstallPrompt.prompt();
+      await this.deferredInstallPrompt.userChoice.catch(() => null);
+      this.deferredInstallPrompt = null;
+      return true;
+    }
+
+    openCamera() {
+      if (!dom.cameraCapture) {
+        return false;
+      }
+
+      dom.cameraCapture.click();
+      return true;
+    }
+
+    async recoverVoiceRuntime(startListening = false) {
       if (this.isRecoveringVoice) {
         return;
       }
@@ -1133,7 +1574,11 @@
         const ready = await this.voice.initialize();
         if (ready) {
           this.ui.showPermissionBanner(false);
-          await this.returnToIdle();
+          await this.returnToIdle(false);
+          if (startListening) {
+            this.handleWake("");
+            this.voice.activateManualListening();
+          }
         }
       } finally {
         this.isRecoveringVoice = false;
@@ -1142,46 +1587,71 @@
 
     async init() {
       this.scene.init();
+      this.registerServiceWorker();
+
       if (!this.settings.rememberContext) {
         this.memory.clear();
       }
+
       this.ui.renderMemory(this.memory.list());
       await this.ui.runStartupSequence();
+
+      const startupLine =
+        "Matrix Omega Ultra online. Neural systems operational. Secure voice interface active. Awaiting authorization.";
 
       this.setState(
         AppState.BOOTING,
         "arming voice channels",
         "Initializing",
         "Matrix Omega Ultra",
-        "Matrix Omega Ultra online. Neural systems operational. Secure voice interface active. Awaiting authorization."
+        startupLine
       );
-      this.ui.updateResponse("Matrix Omega Ultra online. Neural systems operational. Secure voice interface active. Awaiting authorization.");
+      this.ui.updateResponse(startupLine);
+
       if (this.settings.startupGreeting) {
-        this.voice.speak("Matrix Omega Ultra online. Neural systems operational. Secure voice interface active. Awaiting authorization.");
+        this.voice.speak(startupLine);
       }
 
       const ready = await this.voice.initialize();
       if (!ready) {
-        this.ui.showPermissionBanner(true);
+        this.ui.showPermissionBanner(
+          true,
+          "Microphone access is required for Matrix voice control. Tap the avatar, allow microphone access, then speak."
+        );
         this.setState(
           AppState.ALERT,
           "microphone access required",
           "Microphone Required",
           "Voice Runtime Blocked",
-          "Grant microphone access to enable passive wake word detection and live response. Tap the avatar once to retry."
+          "Grant microphone access to enable Matrix voice control. Tap the avatar once to retry."
         );
         return;
       }
 
-      this.ui.showPermissionBanner(false);
-      this.setState(
-        AppState.IDLE,
-        "passive listening active",
-        "Standby",
-        "Matrix Omega Ultra",
-        "Passive listening active. Say Hey Matrix, Matrix, Omega, or Matrix Ultra to begin."
-      );
-      this.voice.startPassiveListening();
+      if (this.voice.usesTapMode()) {
+        this.ui.showPermissionBanner(
+          true,
+          "Matrix is in tap-to-talk mode on this device. Tap the avatar once, speak your command, then pause while it processes."
+        );
+      } else {
+        this.ui.showPermissionBanner(false);
+      }
+
+      await this.returnToIdle();
+      await this.handleLaunchContext();
+    }
+
+    async handleLaunchContext() {
+      if (this.launchContext.route === "settings") {
+        window.location.href = "/settings.html?matrix_source=native";
+        return;
+      }
+
+      if (this.launchContext.listen || this.launchContext.intent === "listen") {
+        await wait(250);
+        this.handleWake("");
+        this.voice.activateManualListening();
+      }
     }
 
     setState(state, subtitle, status, headline, subheadline) {
@@ -1189,6 +1659,26 @@
       this.scene.setState(state);
       this.ui.setState(state, subtitle);
       this.ui.updateStatus(status, headline, subheadline);
+      this.pulseHaptics(state);
+    }
+
+    pulseHaptics(state) {
+      if (!this.settings.hapticsEnabled || typeof navigator.vibrate !== "function") {
+        return;
+      }
+
+      const pattern =
+        {
+          [AppState.LISTENING]: 18,
+          [AppState.THINKING]: [12, 16, 12],
+          [AppState.AUTHORIZING]: [16, 22],
+          [AppState.EXECUTING]: [20, 18, 20],
+          [AppState.ALERT]: [28, 30, 28]
+        }[state] || 0;
+
+      if (pattern) {
+        navigator.vibrate(pattern);
+      }
     }
 
     handleWake(seed) {
@@ -1246,9 +1736,7 @@
         });
       } catch (error) {
         const message =
-          error instanceof Error
-            ? error.message
-            : "An unexpected processing fault occurred.";
+          error instanceof Error ? error.message : "An unexpected processing fault occurred.";
         this.ui.updateResponse(message);
         this.setState(
           AppState.ALERT,
@@ -1271,18 +1759,20 @@
         this.settings.ownerVoicePrint &&
         !ownerCheck.isOwner
       ) {
-        const result = {
-          text: "Owner voice verification failed. Protected operation blocked.",
-          sources: [],
-          latencyMs: 0
-        };
-        await this.deliverResult(result, {
-          state: AppState.ALERT,
-          subtitle: "owner voice mismatch",
-          status: "Blocked",
-          headline: "Voice Guard Active",
-          subheadline: "Protected operation rejected."
-        });
+        await this.deliverResult(
+          {
+            text: "Owner voice verification failed. Protected operation blocked.",
+            sources: [],
+            latencyMs: 0
+          },
+          {
+            state: AppState.ALERT,
+            subtitle: "owner voice mismatch",
+            status: "Blocked",
+            headline: "Voice Guard Active",
+            subheadline: "Protected operation rejected."
+          }
+        );
         return;
       }
 
@@ -1343,19 +1833,21 @@
         this.settings.ownerVoicePrint &&
         !ownerCheck.isOwner
       ) {
-        const blocked = {
-          text: "Authorization rejected. The enrolled owner voice was not recognized.",
-          sources: [],
-          latencyMs: 0
-        };
         this.pendingAuthorization = null;
-        await this.deliverResult(blocked, {
-          state: AppState.ALERT,
-          subtitle: "owner voice mismatch",
-          status: "Rejected",
-          headline: "Voice Guard Active",
-          subheadline: "Authorization denied."
-        });
+        await this.deliverResult(
+          {
+            text: "Authorization rejected. The enrolled owner voice was not recognized.",
+            sources: [],
+            latencyMs: 0
+          },
+          {
+            state: AppState.ALERT,
+            subtitle: "owner voice mismatch",
+            status: "Rejected",
+            headline: "Voice Guard Active",
+            subheadline: "Authorization denied."
+          }
+        );
         return;
       }
 
@@ -1369,18 +1861,20 @@
       if (AUTH_CANCEL_REGEX.test(text)) {
         const canceled = this.pendingAuthorization;
         this.pendingAuthorization = null;
-        const result = {
-          text: `${capitalize(canceled.label || "operation")} canceled.`,
-          sources: [],
-          latencyMs: 0
-        };
-        await this.deliverResult(result, {
-          state: AppState.SPEAKING,
-          subtitle: "authorization canceled",
-          status: "Canceled",
-          headline: "Operation Halted",
-          subheadline: "Protected operation canceled."
-        });
+        await this.deliverResult(
+          {
+            text: `${capitalize(canceled.label || "operation")} canceled.`,
+            sources: [],
+            latencyMs: 0
+          },
+          {
+            state: AppState.SPEAKING,
+            subtitle: "authorization canceled",
+            status: "Canceled",
+            headline: "Operation Halted",
+            subheadline: "Protected operation canceled."
+          }
+        );
         return;
       }
 
@@ -1392,12 +1886,15 @@
       }
 
       const authorizedPlan = this.pendingAuthorization;
-        this.pendingAuthorization = null;
-        await this.processPlannedAction({
+      this.pendingAuthorization = null;
+      await this.processPlannedAction(
+        {
           ...authorizedPlan,
           requiresAuthorization: false
-        }, voiceSignature);
-      }
+        },
+        voiceSignature
+      );
+    }
 
     async deliverResult(result, presentation) {
       this.memory.add("assistant", result.text);
@@ -1418,21 +1915,25 @@
       await this.returnToIdle();
     }
 
-    async returnToIdle() {
-      this.setState(
-        AppState.IDLE,
-        "passive listening active",
-        "Standby",
-        "Matrix Omega Ultra",
-        "Passive listening active. Say Hey Matrix, Matrix, Omega, or Matrix Ultra to begin."
-      );
-      this.ui.updateTranscript("Wake phrase detection standing by.");
+    async returnToIdle(shouldStartPassiveListening = true) {
+      const tapMode = this.voice.usesTapMode();
+      const subtitle = tapMode ? "tap the avatar to speak" : "passive listening active";
+      const subheadline = tapMode
+        ? "Tap the avatar once, speak your command, and Matrix will process it."
+        : "Passive listening active. Say Hey Matrix, Matrix, Omega, or Matrix Ultra to begin.";
+
+      this.setState(AppState.IDLE, subtitle, "Standby", "Matrix Omega Ultra", subheadline);
+      this.ui.updateTranscript(tapMode ? "Tap the avatar to begin." : "Wake phrase detection standing by.");
       this.ui.updateLatency("Standby");
-      this.voice.startPassiveListening();
+
+      if (shouldStartPassiveListening && !tapMode) {
+        this.voice.startPassiveListening();
+      }
     }
 
     handleAlert(message) {
-      this.ui.showPermissionBanner(/microphone|speech recognition|input/i.test(message));
+      const needsMicBanner = /microphone|speech recognition|voice capture|tap-to-talk|input/i.test(message);
+      this.ui.showPermissionBanner(needsMicBanner, needsMicBanner ? message : undefined);
       this.ui.updateResponse(message);
       this.setState(
         AppState.ALERT,
@@ -1459,6 +1960,86 @@
 
   function capitalize(text) {
     return text ? `${text.charAt(0).toUpperCase()}${text.slice(1)}` : "";
+  }
+
+  function isMobilePlatform() {
+    return /android|iphone|ipad|ipod|mobile/i.test(navigator.userAgent);
+  }
+
+  function isIOSPlatform() {
+    return /iphone|ipad|ipod/i.test(navigator.userAgent);
+  }
+
+  function isStandaloneDisplay() {
+    return window.matchMedia("(display-mode: standalone)").matches || window.navigator.standalone === true;
+  }
+
+  function extractPhoneTarget(message, pattern) {
+    const match = message.match(pattern);
+    return match?.[1]?.trim() || "";
+  }
+
+  function normalizePhoneDigits(target) {
+    const digits = target.replace(/[^\d+]/g, "");
+    return /\d{3,}/.test(digits) ? digits : "";
+  }
+
+  function formatPhoneForSpeech(digits) {
+    return digits.replace(/^\+/, "plus ");
+  }
+
+  function extractSmsPayload(message) {
+    const explicit = message.match(
+      /\b(?:text|sms|message)\s+([+()\d\s-]{3,})(?:\s+(?:saying|with message|message|that says)\s+(.+))?/i
+    );
+
+    if (explicit) {
+      return {
+        target: explicit[1].trim(),
+        body: explicit[2]?.trim() || ""
+      };
+    }
+
+    return null;
+  }
+
+  function extractDestination(message) {
+    const match = message.match(/\b(?:navigate to|get directions to|directions to|map)\s+(.+)/i);
+    return match?.[1]?.trim() || "";
+  }
+
+  function buildMapsUrl(destination) {
+    const encoded = encodeURIComponent(destination);
+    if (isIOSPlatform()) {
+      return `https://maps.apple.com/?q=${encoded}`;
+    }
+    return `https://www.google.com/maps/search/?api=1&query=${encoded}`;
+  }
+
+  async function copyText(text) {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(text);
+      return;
+    }
+
+    const input = document.createElement("textarea");
+    input.value = text;
+    input.setAttribute("readonly", "readonly");
+    input.style.position = "fixed";
+    input.style.opacity = "0";
+    document.body.appendChild(input);
+    input.select();
+    document.execCommand("copy");
+    document.body.removeChild(input);
+  }
+
+  function blobToDataUrl(blob) {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onloadend = () => resolve(typeof reader.result === "string" ? reader.result : "");
+      reader.onerror = () => reject(new Error("Failed to read recorded audio."));
+      reader.readAsDataURL(blob);
+    });
   }
 
   function buildVoiceSignature(frames) {

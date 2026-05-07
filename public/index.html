@@ -9,6 +9,10 @@
       content="Matrix Omega Ultra is a cinematic voice-first AI operating core with real-time speech, neural visuals, and secure NVIDIA-backed intelligence."
     />
     <meta name="theme-color" content="#06111f" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="Matrix" />
+    <meta name="mobile-web-app-capable" content="yes" />
     <meta property="og:title" content="Matrix Omega Ultra | Autonomous Voice Core" />
     <meta
       property="og:description"
@@ -23,6 +27,7 @@
       rel="stylesheet"
     />
     <link rel="manifest" href="/manifest.webmanifest" />
+    <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
     <link rel="stylesheet" href="/styles.css" />
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r134/three.min.js"></script>
@@ -111,9 +116,10 @@
       <div id="audio-visualizer"></div>
     </div>
     <div id="permission-banner" class="permission-banner hidden" role="status" aria-live="polite">
-      Microphone access is required for live voice activation. Tap the avatar once, allow microphone access, then say “Hey Matrix”.
+      Microphone access is required for live voice activation. Tap the avatar once to initialize listening, allow microphone access, then speak.
     </div>
     <div id="sr-status" class="sr-only" aria-live="polite"></div>
+    <input id="camera-capture" class="hidden" type="file" accept="image/*" capture="environment" aria-hidden="true" tabindex="-1" />
 
     <script src="/app.js"></script>
   </body>

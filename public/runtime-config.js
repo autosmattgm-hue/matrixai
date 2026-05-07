@@ -5,5 +5,7 @@ window.MATRIX_RUNTIME = {
   executionMode: "browser-shell",
   wakeWords: ["Hey Matrix", "Matrix", "Omega", "Matrix Ultra"],
   model: "meta/llama-4-maverick-17b-128e-instruct",
-  providerConfigured: true
+  asrEndpoint: "/api/matrix/transcribe",
+  asrModel: "nvidia/nemotron-3-nano-30b-vlm",
+  providerConfigured: false
 };

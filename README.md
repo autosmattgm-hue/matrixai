@@ -5,6 +5,7 @@ Matrix is a cinematic, voice-first AI shell built around `AI-head.png`. It combi
 - a secure Express backend for NVIDIA NIM integration
 - a holographic single-page frontend with Tailwind, GSAP, and Three.js
 - Web Speech API wake-word listening, speech synthesis, and local context memory
+- a native launch starter pack for Android Assistant and iPhone Siri handoff in `native/`
 
 ## Deploy to Vercel
 
@@ -67,9 +68,23 @@ npm run dev
 - Matrix routes simple local commands instantly and sends deeper requests to `/api/matrix/respond`.
 - The backend forwards conversation history to NVIDIA's chat completions endpoint and returns the assistant reply to the voice shell.
 
+## Native Phone Launch
+
+The web app now supports native handoff query parameters so a real Android or iPhone wrapper can launch Matrix directly into:
+
+- home: `/?matrix_source=native`
+- listening: `/?matrix_source=native&matrix_intent=listen&matrix_listen=1`
+- settings: `/?matrix_source=native&matrix_route=settings`
+
+Starter files for that layer are included in:
+
+- `native/android/`
+- `native/ios/`
+
 ## Notes
 
 - For security, the NVIDIA API key stays server-side and is never exposed to the browser.
 - If no API key is configured, Matrix still runs in graceful fallback mode with local commands and voice UX intact.
 - NVIDIA chat completions do not provide the same built-in live web search path that the previous OpenAI version used, so truly current answers need a separate search integration if you want them.
 - Browser support is best in Chromium-based browsers because `webkitSpeechRecognition` is still vendor-specific.
+- A web app cannot wake itself from a fully closed background state on iPhone or Android. That requires the native layer scaffolded in `native/`.

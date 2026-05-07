@@ -9,12 +9,18 @@
       content="Configure Matrix Omega Ultra voice, memory, startup, and neural visual behavior."
     />
     <meta name="theme-color" content="#06111f" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="Matrix" />
+    <meta name="mobile-web-app-capable" content="yes" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
       href="https://fonts.googleapis.com/css2?family=Orbitron:wght@500;700&family=Space+Grotesk:wght@400;500;700&display=swap"
       rel="stylesheet"
     />
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
     <link rel="stylesheet" href="/styles.css" />
     <script src="https://cdn.tailwindcss.com"></script>
   </head>
@@ -79,6 +85,15 @@
           <div class="settings-section">
             <p class="settings-section-title">Core Behavior</p>
 
+            <label class="settings-field">
+              <span>Preferred Input Mode</span>
+              <select id="inputMode" name="inputMode" class="settings-control">
+                <option value="auto">Auto Detect</option>
+                <option value="live">Passive Listening</option>
+                <option value="tap">Tap To Talk</option>
+              </select>
+            </label>
+
             <label class="settings-toggle">
               <div>
                 <span>Startup Greeting</span>
@@ -93,6 +108,14 @@
                 <p>Retain conversational context between sessions.</p>
               </div>
               <input id="rememberContext" name="rememberContext" type="checkbox" />
+            </label>
+
+            <label class="settings-toggle">
+              <div>
+                <span>Haptic Feedback</span>
+                <p>Use vibration feedback on supported mobile devices during active Matrix states.</p>
+              </div>
+              <input id="hapticsEnabled" name="hapticsEnabled" type="checkbox" />
             </label>
 
             <label class="settings-field">
@@ -172,6 +195,14 @@
             </div>
             <p class="settings-note">
               Triple-tap the avatar in the main interface to open this page instantly.
+            </p>
+            <div class="settings-actions settings-actions-tight">
+              <button id="install-matrix" type="button" class="settings-button settings-button-primary">
+                Install Matrix
+              </button>
+            </div>
+            <p id="install-status" class="settings-copy-small">
+              Install readiness is being evaluated for this device.
             </p>
           </div>
 

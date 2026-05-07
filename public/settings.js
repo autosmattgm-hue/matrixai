@@ -11,16 +11,21 @@
   const resetButton = document.getElementById("reset-settings");
   const enrollButton = document.getElementById("enroll-owner-voice");
   const clearVoiceButton = document.getElementById("clear-owner-voice");
+  const installButton = document.getElementById("install-matrix");
+  const installStatus = document.getElementById("install-status");
   const voiceprintStatus = document.getElementById("owner-voiceprint-status");
+  let deferredInstallPrompt = null;
 
   const fields = {
     voiceURI: document.getElementById("voiceURI"),
     speechRate: document.getElementById("speechRate"),
     speechPitch: document.getElementById("speechPitch"),
     speechVolume: document.getElementById("speechVolume"),
+    inputMode: document.getElementById("inputMode"),
     startupGreeting: document.getElementById("startupGreeting"),
     visualIntensity: document.getElementById("visualIntensity"),
     rememberContext: document.getElementById("rememberContext"),
+    hapticsEnabled: document.getElementById("hapticsEnabled"),
     voiceRecognitionEnabled: document.getElementById("voiceRecognitionEnabled"),
     restrictSensitiveToOwner: document.getElementById("restrictSensitiveToOwner"),
     ownerMatchThreshold: document.getElementById("ownerMatchThreshold")
@@ -63,9 +68,11 @@
     fields.speechRate.value = settings.speechRate;
     fields.speechPitch.value = settings.speechPitch;
     fields.speechVolume.value = settings.speechVolume;
+    fields.inputMode.value = settings.inputMode;
     fields.startupGreeting.checked = settings.startupGreeting;
     fields.visualIntensity.value = settings.visualIntensity;
     fields.rememberContext.checked = settings.rememberContext;
+    fields.hapticsEnabled.checked = settings.hapticsEnabled;
     fields.voiceRecognitionEnabled.checked = settings.voiceRecognitionEnabled;
     fields.restrictSensitiveToOwner.checked = settings.restrictSensitiveToOwner;
     fields.ownerMatchThreshold.value = settings.ownerMatchThreshold;
@@ -79,9 +86,11 @@
       speechRate: Number(fields.speechRate.value),
       speechPitch: Number(fields.speechPitch.value),
       speechVolume: Number(fields.speechVolume.value),
+      inputMode: fields.inputMode.value,
       startupGreeting: fields.startupGreeting.checked,
       visualIntensity: Number(fields.visualIntensity.value),
       rememberContext: fields.rememberContext.checked,
+      hapticsEnabled: fields.hapticsEnabled.checked,
       voiceRecognitionEnabled: fields.voiceRecognitionEnabled.checked,
       restrictSensitiveToOwner: fields.restrictSensitiveToOwner.checked,
       ownerMatchThreshold: Number(fields.ownerMatchThreshold.value),
@@ -265,19 +274,102 @@
     };
   }
 
+  function isIOS() {
+    return /iphone|ipad|ipod/i.test(navigator.userAgent);
+  }
+
+  function isStandalone() {
+    return window.matchMedia("(display-mode: standalone)").matches || window.navigator.standalone === true;
+  }
+
+  function updateInstallStatus(message) {
+    if (installStatus) {
+      installStatus.textContent = message;
+    }
+  }
+
+  function syncInstallState() {
+    if (!installButton || !installStatus) {
+      return;
+    }
+
+    if (isStandalone()) {
+      installButton.disabled = true;
+      installButton.setAttribute("aria-disabled", "true");
+      updateInstallStatus("Matrix is already installed on this device.");
+      return;
+    }
+
+    if (deferredInstallPrompt) {
+      installButton.disabled = false;
+      installButton.removeAttribute("aria-disabled");
+      updateInstallStatus("Install prompt is ready.");
+      return;
+    }
+
+    if (isIOS()) {
+      installButton.disabled = true;
+      installButton.setAttribute("aria-disabled", "true");
+      updateInstallStatus("On iPhone or iPad, use Share and then Add to Home Screen.");
+      return;
+    }
+
+    installButton.disabled = true;
+    installButton.setAttribute("aria-disabled", "true");
+    updateInstallStatus("Install prompt is not available yet in this browser session.");
+  }
+
+  async function installMatrix() {
+    if (deferredInstallPrompt) {
+      deferredInstallPrompt.prompt();
+      await deferredInstallPrompt.userChoice.catch(() => null);
+      deferredInstallPrompt = null;
+      syncInstallState();
+      status.textContent = "Install prompt opened.";
+      return;
+    }
+
+    if (isIOS()) {
+      status.textContent = "Use Share, then Add to Home Screen to install Matrix on iPhone.";
+      syncInstallState();
+      return;
+    }
+
+    status.textContent = "Install prompt is not available yet in this browser.";
+    syncInstallState();
+  }
+
   const initialSettings = settingsApi.load();
   applyToForm(initialSettings);
   loadVoices();
+  syncInstallState();
+
+  if ("serviceWorker" in navigator) {
+    navigator.serviceWorker.register("/sw.js").catch(() => {});
+  }
 
   if ("speechSynthesis" in window) {
     window.speechSynthesis.onvoiceschanged = loadVoices;
   }
+
+  window.addEventListener("beforeinstallprompt", (event) => {
+    event.preventDefault();
+    deferredInstallPrompt = event;
+    syncInstallState();
+  });
+
+  window.addEventListener("appinstalled", () => {
+    deferredInstallPrompt = null;
+    syncInstallState();
+    status.textContent = "Matrix installed successfully.";
+  });
 
   form.addEventListener("submit", saveSettings);
   previewButton.addEventListener("click", previewVoice);
   resetButton.addEventListener("click", resetSettings);
   enrollButton.addEventListener("click", enrollOwnerVoice);
   clearVoiceButton.addEventListener("click", clearOwnerVoice);
+  installButton.addEventListener("click", installMatrix);
 
   for (const input of Object.values(fields)) {
     input.addEventListener("input", syncOutputs);
