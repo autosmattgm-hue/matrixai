@@ -104,6 +104,52 @@
             </label>
           </div>
 
+          <div class="settings-section">
+            <p class="settings-section-title">Owner Voice Recognition</p>
+
+            <label class="settings-toggle">
+              <div>
+                <span>Enable Owner Voice Recognition</span>
+                <p>Use a locally enrolled voiceprint to identify the device owner during voice sessions.</p>
+              </div>
+              <input id="voiceRecognitionEnabled" name="voiceRecognitionEnabled" type="checkbox" />
+            </label>
+
+            <label class="settings-toggle">
+              <div>
+                <span>Restrict Sensitive Actions To Owner</span>
+                <p>Protected operations require an enrolled owner voice match before authorization can proceed.</p>
+              </div>
+              <input id="restrictSensitiveToOwner" name="restrictSensitiveToOwner" type="checkbox" />
+            </label>
+
+            <label class="settings-field">
+              <span>Owner Match Threshold</span>
+              <div class="settings-range-row">
+                <input id="ownerMatchThreshold" name="ownerMatchThreshold" type="range" min="0.08" max="0.40" step="0.01" />
+                <output id="ownerMatchThresholdValue" class="settings-range-value">0.18</output>
+              </div>
+            </label>
+
+            <div class="settings-voiceprint-card">
+              <p class="settings-voiceprint-title">Owner Voiceprint</p>
+              <p id="owner-voiceprint-status" class="settings-copy-small">
+                No owner voice enrolled.
+              </p>
+              <div class="settings-actions settings-actions-tight">
+                <button id="enroll-owner-voice" type="button" class="settings-button settings-button-primary">
+                  Enroll Owner Voice
+                </button>
+                <button id="clear-owner-voice" type="button" class="settings-button">
+                  Clear Voiceprint
+                </button>
+              </div>
+              <p class="settings-note">
+                Enrollment captures a short local audio sample in this browser and stores a voice signature on this device only.
+              </p>
+            </div>
+          </div>
+
           <div class="settings-actions">
             <button id="save-settings" type="submit" class="settings-button settings-button-primary">
               Save Settings

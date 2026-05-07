@@ -272,6 +272,10 @@ a {
   margin-top: 1.6rem;
 }
 
+.settings-actions-tight {
+  margin-top: 1rem;
+}
+
 .settings-button,
 .settings-link {
   display: inline-flex;
@@ -317,6 +321,20 @@ a {
   font-size: 0.82rem;
   letter-spacing: 0.08em;
   text-transform: uppercase;
+}
+
+.settings-voiceprint-card {
+  margin-top: 0.9rem;
+  padding: 1rem;
+  border: 1px solid rgba(var(--accent), 0.08);
+  border-radius: 1.1rem;
+  background: rgba(4, 12, 23, 0.45);
+}
+
+.settings-voiceprint-title {
+  margin: 0 0 0.6rem;
+  font-weight: 700;
+  color: rgba(240, 249, 255, 0.95);
 }
 
 .hud-panel {

@@ -433,6 +433,7 @@
       this.readyToSpeak = false;
       this.pendingGreeting = null;
       this.voices = [];
+      this.voiceFrames = [];
       this.setupSpeechSynthesis();
       this.installKeyboardFallback();
     }
@@ -577,6 +578,7 @@
       this.mode = mode;
       this.finalSegments = seed ? [seed] : [];
       this.interimSegment = "";
+      this.voiceFrames = [];
       this.restartSilenceTimer();
     }
 
@@ -663,13 +665,15 @@
 
       this.mode = "processing";
       this.stopListening();
+      const voiceSignature = buildVoiceSignature(this.voiceFrames);
+      this.voiceFrames = [];
 
       if (!text && mode === "command") {
-        this.onCommand("Status report.");
+        this.onCommand("Status report.", mode, voiceSignature);
         return;
       }
 
-      this.onCommand(text, mode);
+      this.onCommand(text, mode, voiceSignature);
     }
 
     async speak(text) {
@@ -718,6 +722,14 @@
           this.analyser.getByteFrequencyData(this.dataArray);
           const values = Array.from(this.dataArray.slice(0, 24), (value) => value / 255);
           const average = values.reduce((sum, value) => sum + value, 0) / values.length;
+
+          if ((this.mode === "command" || this.mode === "authorization") && average > 0.08) {
+            this.voiceFrames.push(values);
+            if (this.voiceFrames.length > 120) {
+              this.voiceFrames.shift();
+            }
+          }
+
           this.onAudioLevel(average, values);
         }
         requestAnimationFrame(tick);
@@ -1003,7 +1015,7 @@
       this.voice = new MatrixVoiceEngine({
         onWake: (seed) => this.handleWake(seed),
         onTranscript: (text) => this.handleTranscript(text),
-        onCommand: (text, mode) => this.handleCommand(text, mode),
+        onCommand: (text, mode, voiceSignature) => this.handleCommand(text, mode, voiceSignature),
         onError: (message) => this.handleAlert(message),
         onAudioLevel: (level, values) => this.handleAudio(level, values),
         settings: this.settings
@@ -1100,9 +1112,9 @@
       this.ui.updateTranscript(text);
     }
 
-    async handleCommand(text, mode = "command") {
+    async handleCommand(text, mode = "command", voiceSignature = null) {
       if (mode === "authorization") {
-        await this.handleAuthorization(text);
+        await this.handleAuthorization(text, voiceSignature);
         return;
       }
 
@@ -1112,7 +1124,7 @@
 
       const plan = this.ai.planAction(text);
       if (plan) {
-        await this.processPlannedAction(plan);
+        await this.processPlannedAction(plan, voiceSignature);
         return;
       }
 
@@ -1153,7 +1165,31 @@
       }
     }
 
-    async processPlannedAction(plan) {
+    async processPlannedAction(plan, voiceSignature = null) {
+      const ownerCheck = evaluateOwnerVoice(this.settings, voiceSignature);
+
+      if (
+        plan.requiresAuthorization &&
+        this.settings.voiceRecognitionEnabled &&
+        this.settings.restrictSensitiveToOwner &&
+        this.settings.ownerVoicePrint &&
+        !ownerCheck.isOwner
+      ) {
+        const result = {
+          text: "Owner voice verification failed. Protected operation blocked.",
+          sources: [],
+          latencyMs: 0
+        };
+        await this.deliverResult(result, {
+          state: AppState.ALERT,
+          subtitle: "owner voice mismatch",
+          status: "Blocked",
+          headline: "Voice Guard Active",
+          subheadline: "Protected operation rejected."
+        });
+        return;
+      }
+
       if (plan.requiresAuthorization) {
         this.pendingAuthorization = plan;
         this.setState(
@@ -1195,11 +1231,35 @@
       }
     }
 
-    async handleAuthorization(text) {
+    async handleAuthorization(text, voiceSignature = null) {
       this.ui.updateTranscript(text || "Authorization response pending.");
 
       if (!this.pendingAuthorization) {
         await this.returnToIdle();
+        return;
+      }
+
+      const ownerCheck = evaluateOwnerVoice(this.settings, voiceSignature);
+
+      if (
+        this.settings.voiceRecognitionEnabled &&
+        this.settings.restrictSensitiveToOwner &&
+        this.settings.ownerVoicePrint &&
+        !ownerCheck.isOwner
+      ) {
+        const blocked = {
+          text: "Authorization rejected. The enrolled owner voice was not recognized.",
+          sources: [],
+          latencyMs: 0
+        };
+        this.pendingAuthorization = null;
+        await this.deliverResult(blocked, {
+          state: AppState.ALERT,
+          subtitle: "owner voice mismatch",
+          status: "Rejected",
+          headline: "Voice Guard Active",
+          subheadline: "Authorization denied."
+        });
         return;
       }
 
@@ -1236,12 +1296,12 @@
       }
 
       const authorizedPlan = this.pendingAuthorization;
-      this.pendingAuthorization = null;
-      await this.processPlannedAction({
-        ...authorizedPlan,
-        requiresAuthorization: false
-      });
-    }
+        this.pendingAuthorization = null;
+        await this.processPlannedAction({
+          ...authorizedPlan,
+          requiresAuthorization: false
+        }, voiceSignature);
+      }
 
     async deliverResult(result, presentation) {
       this.memory.add("assistant", result.text);
@@ -1303,6 +1363,61 @@
 
   function capitalize(text) {
     return text ? `${text.charAt(0).toUpperCase()}${text.slice(1)}` : "";
+  }
+
+  function buildVoiceSignature(frames) {
+    if (!Array.isArray(frames) || frames.length < 8) {
+      return null;
+    }
+
+    const length = frames[0]?.length || 0;
+    const bins = new Array(length).fill(0);
+
+    for (const frame of frames) {
+      for (let index = 0; index < length; index += 1) {
+        bins[index] += frame[index];
+      }
+    }
+
+    const averaged = bins.map((value) => value / frames.length);
+    const total = averaged.reduce((sum, value) => sum + value, 0) || 1;
+    const normalized = averaged.map((value) => value / total);
+    const centroid =
+      normalized.reduce((sum, value, index) => sum + value * (index / Math.max(1, normalized.length - 1)), 0);
+    const energy = averaged.reduce((sum, value) => sum + value, 0) / averaged.length;
+
+    return {
+      bins: normalized,
+      centroid,
+      energy,
+      frames: frames.length
+    };
+  }
+
+  function evaluateOwnerVoice(settings, sample) {
+    if (!settings.voiceRecognitionEnabled || !settings.ownerVoicePrint || !sample) {
+      return {
+        isOwner: !settings.voiceRecognitionEnabled || !settings.ownerVoicePrint,
+        score: null
+      };
+    }
+
+    const profile = settings.ownerVoicePrint;
+    const binsLength = Math.min(profile.bins.length, sample.bins.length);
+    let diff = 0;
+
+    for (let index = 0; index < binsLength; index += 1) {
+      diff += Math.abs(profile.bins[index] - sample.bins[index]);
+    }
+
+    diff /= Math.max(1, binsLength);
+    diff += Math.abs(profile.centroid - sample.centroid) * 0.6;
+    diff += Math.abs(profile.energy - sample.energy) * 0.25;
+
+    return {
+      isOwner: diff <= settings.ownerMatchThreshold,
+      score: diff
+    };
   }
 
   const app = new MatrixApp();
