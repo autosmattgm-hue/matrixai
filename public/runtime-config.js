@@ -3,9 +3,9 @@ window.MATRIX_RUNTIME = {
   healthEndpoint: "/api/health",
   provider: "nvidia",
   executionMode: "browser-shell",
-  wakeWords: ["Hey Matrix", "Matrix", "Omega", "Matrix Ultra"],
+  wakeWords: ["Hey Matrix", "Matrix", "Omega"],
   model: "meta/llama-4-maverick-17b-128e-instruct",
   asrEndpoint: "/api/matrix/transcribe",
-  asrModel: "nvidia/nemotron-3-nano-30b-vlm",
+  asrModel: "microsoft/phi-4-multimodal-instruct",
   providerConfigured: false
 };

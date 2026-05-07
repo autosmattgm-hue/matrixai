@@ -63,7 +63,7 @@ npm run dev
 
 ## Voice flow
 
-- Idle mode continuously waits for `Hey Matrix` or `Matrix`.
+- Idle mode continuously waits for `Hey Matrix`, `Matrix`, or `Omega`.
 - After activation, speech recognition captures the command in real time.
 - Matrix routes simple local commands instantly and sends deeper requests to `/api/matrix/respond`.
 - The backend forwards conversation history to NVIDIA's chat completions endpoint and returns the assistant reply to the voice shell.

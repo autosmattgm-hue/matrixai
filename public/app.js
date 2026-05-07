@@ -34,10 +34,10 @@
     healthEndpoint: "/api/health",
     provider: "nvidia",
     executionMode: "browser-shell",
-    wakeWords: ["Hey Matrix", "Matrix", "Omega", "Matrix Ultra"],
+    wakeWords: ["Hey Matrix", "Matrix", "Omega"],
     model: "meta/llama-4-maverick-17b-128e-instruct",
     asrEndpoint: "/api/matrix/transcribe",
-    asrModel: "nvidia/nemotron-3-nano-30b-vlm",
+    asrModel: "microsoft/phi-4-multimodal-instruct",
     providerConfigured: false
   };
 
@@ -60,7 +60,7 @@
         hapticsEnabled: true
       };
 
-  const wakeRegex = /\b(?:hey\s+matrix|matrix\s+ultra|matrix|omega)\b/i;
+  const wakeRegex = /\b(?:hey\s+matrix|matrix|omega)\b/i;
   const AUTH_CONFIRM_REGEX = /\b(?:authorize|authorise|confirmed|confirm|proceed|approved|grant access|yes)\b/i;
   const AUTH_CANCEL_REGEX = /\b(?:cancel|deny|abort|stop|negative|no)\b/i;
   const SENSITIVE_ACTION_REGEX =
@@ -434,15 +434,18 @@
       this.settings = settings;
       this.recognition = null;
       this.audioContext = null;
+      this.sourceNode = null;
       this.analyser = null;
       this.dataArray = null;
       this.stream = null;
-      this.mediaRecorder = null;
-      this.recordedChunks = [];
       this.fallbackMode = false;
       this.fallbackCaptureMode = "command";
       this.fallbackRecording = false;
       this.fallbackRecordingStopTimer = null;
+      this.fallbackProcessorNode = null;
+      this.fallbackSilenceNode = null;
+      this.fallbackAudioChunks = [];
+      this.fallbackSampleRate = 44100;
       this.isInitializing = false;
       this.isReady = false;
       this.isRecognizing = false;
@@ -541,7 +544,8 @@
         return "tap";
       }
 
-      return isMobilePlatform() ? "tap" : "live";
+      const Recognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+      return Recognition ? "live" : "tap";
     }
 
     async resumeAudioContext() {
@@ -625,11 +629,11 @@
       if (!this.audioContext) {
         this.audioContext = new (window.AudioContext || window.webkitAudioContext)();
         await this.resumeAudioContext();
-        const source = this.audioContext.createMediaStreamSource(this.stream);
+        this.sourceNode = this.audioContext.createMediaStreamSource(this.stream);
         this.analyser = this.audioContext.createAnalyser();
         this.analyser.fftSize = 128;
         this.dataArray = new Uint8Array(this.analyser.frequencyBinCount);
-        source.connect(this.analyser);
+        this.sourceNode.connect(this.analyser);
         this.monitorAudio();
       }
 
@@ -695,7 +699,7 @@
     }
 
     promoteToFallbackMode(message) {
-      if (typeof MediaRecorder === "undefined") {
+      if (!this.audioContext || !this.sourceNode) {
         this.onError(message);
         return;
       }
@@ -808,7 +812,7 @@
     }
 
     async toggleFallbackRecording(mode = "command") {
-      if (!this.isReady || !this.stream || typeof MediaRecorder === "undefined") {
+      if (!this.isReady || !this.stream || !this.audioContext || !this.sourceNode) {
         this.onError("Tap-to-talk is unavailable in this browser.");
         return;
       }
@@ -820,59 +824,72 @@
 
       this.fallbackCaptureMode = mode;
       this.beginDirectMode(mode, "");
-      this.recordedChunks = [];
-      const recorderOptions = MediaRecorder.isTypeSupported("audio/webm;codecs=opus")
-        ? { mimeType: "audio/webm;codecs=opus" }
-        : MediaRecorder.isTypeSupported("audio/webm")
-          ? { mimeType: "audio/webm" }
-          : null;
-      this.mediaRecorder = recorderOptions
-        ? new MediaRecorder(this.stream, recorderOptions)
-        : new MediaRecorder(this.stream);
+      window.clearTimeout(this.silenceTimer);
+      this.fallbackAudioChunks = [];
+      this.fallbackSampleRate = this.audioContext.sampleRate || 44100;
+      await this.resumeAudioContext();
+      this.fallbackProcessorNode = this.audioContext.createScriptProcessor(4096, 1, 1);
+      this.fallbackSilenceNode = this.audioContext.createGain();
+      this.fallbackSilenceNode.gain.value = 0;
 
-      this.mediaRecorder.ondataavailable = (event) => {
-        if (event.data && event.data.size > 0) {
-          this.recordedChunks.push(event.data);
-        }
-      };
-
-      this.mediaRecorder.onstop = async () => {
-        this.fallbackRecording = false;
-        window.clearTimeout(this.fallbackRecordingStopTimer);
-
-        const audioBlob = new Blob(this.recordedChunks, {
-          type: this.mediaRecorder?.mimeType || "audio/webm"
-        });
-        this.recordedChunks = [];
-
-        if (!audioBlob.size) {
-          this.onError("No microphone input was captured. Tap the avatar and try again.");
+      this.fallbackProcessorNode.onaudioprocess = (event) => {
+        if (!this.fallbackRecording) {
           return;
         }
 
-        try {
-          const audioDataUrl = await blobToDataUrl(audioBlob);
-          const transcript = await this.transcribeFallbackAudio(audioDataUrl);
-          this.onTranscript(transcript || "Listening for command...");
-          const voiceSignature = buildVoiceSignature(this.voiceFrames);
-          this.voiceFrames = [];
-          this.mode = "processing";
-          this.onCommand(transcript || "Status report.", this.fallbackCaptureMode, voiceSignature);
-        } catch (_error) {
-          this.onError("Audio transcription failed. Tap the avatar and try again.");
-        }
+        const input = event.inputBuffer.getChannelData(0);
+        this.fallbackAudioChunks.push(new Float32Array(input));
       };
 
+      this.sourceNode.connect(this.fallbackProcessorNode);
+      this.fallbackProcessorNode.connect(this.fallbackSilenceNode);
+      this.fallbackSilenceNode.connect(this.audioContext.destination);
       this.fallbackRecording = true;
-      this.mediaRecorder.start();
       this.fallbackRecordingStopTimer = window.setTimeout(() => {
         this.stopFallbackRecording();
       }, 6500);
     }
 
-    stopFallbackRecording() {
-      if (this.mediaRecorder && this.fallbackRecording && this.mediaRecorder.state !== "inactive") {
-        this.mediaRecorder.stop();
+    async stopFallbackRecording() {
+      if (!this.fallbackRecording) {
+        return;
+      }
+
+      this.fallbackRecording = false;
+      window.clearTimeout(this.fallbackRecordingStopTimer);
+
+      if (this.fallbackProcessorNode) {
+        this.fallbackProcessorNode.onaudioprocess = null;
+        this.fallbackProcessorNode.disconnect();
+      }
+
+      if (this.fallbackSilenceNode) {
+        this.fallbackSilenceNode.disconnect();
+      }
+
+      this.fallbackProcessorNode = null;
+      this.fallbackSilenceNode = null;
+
+      const audioBlob = encodeWavBlob(this.fallbackAudioChunks, this.fallbackSampleRate);
+      this.fallbackAudioChunks = [];
+
+      if (!audioBlob.size) {
+        this.onError("No microphone input was captured. Tap the avatar and try again.");
+        return;
+      }
+
+      try {
+        const audioDataUrl = await blobToDataUrl(audioBlob);
+        const transcript = await this.transcribeFallbackAudio(audioDataUrl);
+        this.onTranscript(transcript || "Listening for command...");
+        const voiceSignature = buildVoiceSignature(this.voiceFrames);
+        this.voiceFrames = [];
+        this.mode = "processing";
+        this.onCommand(transcript || "Status report.", this.fallbackCaptureMode, voiceSignature);
+      } catch (error) {
+        const message =
+          error instanceof Error ? error.message : "Audio transcription failed. Tap the avatar and try again.";
+        this.onError(message);
       }
     }
 
@@ -887,7 +904,18 @@
       });
 
       if (!response.ok) {
-        throw new Error(`Matrix transcription backend returned ${response.status}`);
+        let message = `Matrix transcription backend returned ${response.status}`;
+        try {
+          const payload = await response.json();
+          if (payload?.detail) {
+            message = payload.detail;
+          } else if (payload?.error) {
+            message = payload.error;
+          }
+        } catch (_error) {
+          // Ignore JSON parsing failure and keep the generic message.
+        }
+        throw new Error(message);
       }
 
       const payload = await response.json();
@@ -1920,7 +1948,7 @@
       const subtitle = tapMode ? "tap the avatar to speak" : "passive listening active";
       const subheadline = tapMode
         ? "Tap the avatar once, speak your command, and Matrix will process it."
-        : "Passive listening active. Say Hey Matrix, Matrix, Omega, or Matrix Ultra to begin.";
+        : "Passive listening active. Say Hey Matrix, Matrix, or Omega to begin.";
 
       this.setState(AppState.IDLE, subtitle, "Standby", "Matrix Omega Ultra", subheadline);
       this.ui.updateTranscript(tapMode ? "Tap the avatar to begin." : "Wake phrase detection standing by.");
@@ -2040,6 +2068,57 @@
       reader.onerror = () => reject(new Error("Failed to read recorded audio."));
       reader.readAsDataURL(blob);
     });
+  }
+
+  function encodeWavBlob(chunks, sampleRate) {
+    if (!Array.isArray(chunks) || !chunks.length) {
+      return new Blob([], { type: "audio/wav" });
+    }
+
+    let totalSamples = 0;
+    for (const chunk of chunks) {
+      totalSamples += chunk.length;
+    }
+
+    const pcmBuffer = new Float32Array(totalSamples);
+    let offset = 0;
+
+    for (const chunk of chunks) {
+      pcmBuffer.set(chunk, offset);
+      offset += chunk.length;
+    }
+
+    const wavBuffer = new ArrayBuffer(44 + pcmBuffer.length * 2);
+    const view = new DataView(wavBuffer);
+
+    writeAscii(view, 0, "RIFF");
+    view.setUint32(4, 36 + pcmBuffer.length * 2, true);
+    writeAscii(view, 8, "WAVE");
+    writeAscii(view, 12, "fmt ");
+    view.setUint32(16, 16, true);
+    view.setUint16(20, 1, true);
+    view.setUint16(22, 1, true);
+    view.setUint32(24, sampleRate, true);
+    view.setUint32(28, sampleRate * 2, true);
+    view.setUint16(32, 2, true);
+    view.setUint16(34, 16, true);
+    writeAscii(view, 36, "data");
+    view.setUint32(40, pcmBuffer.length * 2, true);
+
+    let index = 44;
+    for (let sampleIndex = 0; sampleIndex < pcmBuffer.length; sampleIndex += 1) {
+      const sample = Math.max(-1, Math.min(1, pcmBuffer[sampleIndex]));
+      view.setInt16(index, sample < 0 ? sample * 0x8000 : sample * 0x7fff, true);
+      index += 2;
+    }
+
+    return new Blob([wavBuffer], { type: "audio/wav" });
+  }
+
+  function writeAscii(view, offset, value) {
+    for (let index = 0; index < value.length; index += 1) {
+      view.setUint8(offset + index, value.charCodeAt(index));
+    }
   }
 
   function buildVoiceSignature(frames) {
