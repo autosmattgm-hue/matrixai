@@ -1005,18 +1005,7 @@
       });
 
       if (!response.ok) {
-        let message = `Matrix transcription backend returned ${response.status}`;
-        try {
-          const payload = await response.json();
-          if (payload?.detail) {
-            message = payload.detail;
-          } else if (payload?.error) {
-            message = payload.error;
-          }
-        } catch (_error) {
-          // Ignore JSON parsing failure and keep the generic message.
-        }
-        throw new Error(message);
+        throw new Error(await readBackendError(response, `Matrix transcription backend returned ${response.status}`));
       }
 
       const payload = await response.json();
@@ -1195,7 +1184,7 @@
       });
 
       if (!response.ok) {
-        throw new Error(`Matrix backend returned ${response.status}`);
+        throw new Error(await readBackendError(response, `Matrix backend returned ${response.status}`));
       }
 
       const payload = await response.json();
@@ -2165,6 +2154,15 @@
     input.select();
     document.execCommand("copy");
     document.body.removeChild(input);
+  }
+
+  async function readBackendError(response, fallback) {
+    try {
+      const payload = await response.json();
+      return payload?.detail || payload?.error || payload?.text || fallback;
+    } catch (_error) {
+      return fallback;
+    }
   }
 
   function blobToDataUrl(blob) {

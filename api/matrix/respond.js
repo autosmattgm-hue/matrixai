@@ -1,4 +1,3 @@
-import "dotenv/config";
 import { handleRespond } from "../../lib/matrix-api.js";
 
 export default async function handler(req, res) {

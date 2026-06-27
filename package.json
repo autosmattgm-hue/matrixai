@@ -6,19 +6,10 @@
   "scripts": {
     "dev": "node --watch server.js",
     "start": "node server.js",
-    "check": "node --check server.js && node --check public/app.js",
+    "check": "node --check server.js && node --check lib/matrix-api.js && node --check api/health.js && node --check api/matrix/respond.js && node --check api/matrix/transcribe.js && node --check api/runtime-config.js && node --check public/app.js && node --check public/sw.js && node --check public/runtime-config-fallback.js",
     "vercel:dev": "vercel dev",
     "vercel:deploy": "vercel",
     "vercel:prod": "vercel --prod"
   },
-  "dependencies": {
-    "compression": "^1.8.1",
-    "dotenv": "^16.6.1",
-    "express": "^5.1.0",
-    "express-rate-limit": "^8.1.0",
-    "helmet": "^8.1.0"
-  },
-  "devDependencies": {
-    "vercel": "^48.4.1"
-  }
+  "dependencies": {}
 }

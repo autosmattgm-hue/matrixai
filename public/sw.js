@@ -1,10 +1,10 @@
-const CACHE_NAME = "matrix-shell-v7";
+const CACHE_NAME = "matrix-shell-v8";
 const APP_SHELL = [
   "/",
   "/index.html",
   "/styles.css",
   "/app.js",
-  "/runtime-config.js",
+  "/runtime-config-fallback.js",
   "/matrix-settings.js",
   "/settings.html",
   "/settings.js",
@@ -38,6 +38,13 @@ self.addEventListener("fetch", (event) => {
   const url = new URL(request.url);
 
   if (request.method !== "GET" || url.origin !== self.location.origin || url.pathname.startsWith("/api/")) {
+    return;
+  }
+
+  if (url.pathname === "/runtime-config.js") {
+    event.respondWith(
+      fetch(request, { cache: "no-store" }).catch(() => caches.match("/runtime-config-fallback.js"))
+    );
     return;
   }
 
